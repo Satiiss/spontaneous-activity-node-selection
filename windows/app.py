@@ -122,18 +122,13 @@ class Plot(QWidget):
             p.drawText(self.width()-175, self.height()-18, f'色阶 0 – {peak:.1f} Hz（动态）')
 
 
-def panel(title, subtitle, widget):
+def panel(title, widget):
     box = QWidget()
     box.setObjectName('card')
     layout = QVBoxLayout(box)
     name = QLabel(title)
     name.setObjectName('section')
     layout.addWidget(name)
-    if subtitle:
-        hint = QLabel(subtitle)
-        hint.setObjectName('muted')
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
     layout.addWidget(widget, 1)
     return box
 
@@ -192,7 +187,7 @@ class Window(QMainWindow):
         for label, widget in [('剩余时间', self.time_label), ('录制状态', self.state_label),
                                ('累计 Spike', self.count_label), ('活动 / 映射通道', self.channel_label)]:
             widget.setObjectName('metric')
-            metrics.addWidget(panel(label, '', widget))
+            metrics.addWidget(panel(label, widget))
         layout.addLayout(metrics)
         self.progress = QProgressBar()
         self.progress.setRange(0, 6000)
@@ -200,8 +195,7 @@ class Window(QMainWindow):
         self.progress.setFixedHeight(6)
         layout.addWidget(self.progress)
         self.raster, self.heat = Plot('raster'), Plot('heat')
-        self.raster_hint = '最近 5 秒 · 横轴为流内时间，纵轴为通道编号'
-        layout.addWidget(panel('实时放电栅格图', self.raster_hint, self.raster), 1)
+        layout.addWidget(panel('实时放电栅格图', self.raster), 1)
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(['通道 CH', '电极 ID', '放电率 Hz'])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
@@ -210,15 +204,10 @@ class Window(QMainWindow):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
         bottom = QSplitter(Qt.Horizontal)
-        bottom.addWidget(panel('电极活动热力图', '真实模式使用路由坐标 · 无放电电极保持显示', self.heat))
-        bottom.addWidget(panel('各通道放电率', '最近 5 秒完整 Spike 计数 / 有效窗口秒数 · 按通道排序', self.table))
+        bottom.addWidget(panel('电极活动热力图', self.heat))
+        bottom.addWidget(panel('各通道放电率', self.table))
         bottom.setSizes([740, 460])
         layout.addWidget(bottom, 1)
-        self.detail = QLabel('录制文件由采集服务所在电脑保存。')
-        self.detail.setWordWrap(True)
-        self.detail.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.detail.setObjectName('muted')
-        layout.addWidget(self.detail)
         self.timer = QTimer(self)
         self.timer.setInterval(250)
         self.timer.timeout.connect(self.poll)
@@ -322,9 +311,6 @@ class Window(QMainWindow):
                     cell = QTableWidgetItem()
                     self.table.setItem(i, j, cell)
                 cell.setText(text)
-        saved = '；'.join(job.get('files', [])) or job['directory']
-        self.detail.setText(f"保存位置：{saved}\n统计窗口 {job['window_s']:.2f} s · 流覆盖 {job['acquired_s']:.2f} s · "
-                            + ('栅格图已抽样，放电率使用完整数据' if job.get('raster_sampled') else '栅格图显示窗口内全部 Spike'))
 
     def closeEvent(self, event):
         if self.job and self.job['state'] in ACTIVE:
