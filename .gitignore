@@ -1,0 +1,42 @@
+# Python and local environments
+__pycache__/
+*.py[cod]
+.venv/
+.venv-*/
+.pytest_cache/
+.coverage
+
+# Experiment data, results and local configuration
+data/
+recordings/
+artifacts/
+*.h5
+*.hdf5
+*.sqlite*
+*.log
+*.zip
+hardware.json
+*.local.json
+mapping.json
+*.cfg
+.env
+.env.*
+!.env.example
+
+# Generated binaries and vendor SDKs (not redistributed)
+linux/reader/build*/
+build/
+dist/
+vendor/
+sdk/
+*.exe
+*.dll
+*.pdb
+*.o
+*.a
+*.so
+
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store

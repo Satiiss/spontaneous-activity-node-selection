@@ -1,0 +1,32 @@
+name: Hardware-free checks
+on: [push, pull_request]
+jobs:
+  service:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r linux/requirements.txt
+      - run: python -m unittest -v tests.test_service
+      - run: python -m compileall -q windows linux shared tests
+  windows-ui:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r windows/requirements.txt -r linux/requirements.txt
+      - run: python -m tests.verify_ui
+  passive-reader:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S linux/reader -B linux/reader/build
+      - run: cmake --build linux/reader/build -j2
+      - run: python3 -m linux.reader_protocol --reader ./linux/reader/build/mea_reader --mode mock --frames 20000

@@ -1,0 +1,11 @@
+{
+  "prepared_fixed_routing": false,
+  "sample_rate_verified": false,
+  "exclusive_saving_confirmed": false,
+  "sample_rate": 20000,
+  "well": 0,
+  "filter": "iir",
+  "routing_path": "/absolute/path/to/current-routing.cfg",
+  "mapping_path": "/absolute/path/to/mapping.json",
+  "reader_path": "/absolute/path/to/spontaneous-activity-node-selection/linux/reader/build/mea_reader"
+}
