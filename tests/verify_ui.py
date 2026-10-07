@@ -46,8 +46,18 @@ def run():
             wait_for(lambda: window.online and window.worker is None)
             assert window.start_button.isEnabled()
             checks.append('Connect to an independent service using HTTP and token')
+            # Query in flight must not dim controls or swallow a start click.
+            window.timer.stop()
+            window.poll()
+            assert window.worker.path == '/v1/status'
+            assert window.connect_button.isEnabled()
+            assert window.start_button.isEnabled()
             # Use the real Windows start button: default 600 seconds, then stop early.
             window.start_recording()
+            assert window.pending_command[0] == '/v1/start'
+            assert not window.start_button.isEnabled()
+            checks.append('Status polling keeps controls stable and queues a start click')
+            window.timer.start()
             wait_for(lambda: window.job and window.job['elapsed_s'] > 5)
             assert window.job['duration_s'] == 600
             assert window.job['mode'] == 'mock'
@@ -64,13 +74,26 @@ def run():
             window.grab().save(str(output/'live_1040.png'))
             jid = window.job['job_id']
             wait_for(lambda: window.worker is None)
+            window.timer.stop()
+            window.poll()
+            assert window.stop_button.isEnabled()
+            assert window.connect_button.isEnabled()
             window.connect_service()
             assert not window.connected
+            wait_for(lambda: window.worker is None)
+            assert not window.online
+            assert not window.start_button.isEnabled()
+            checks.append('Disconnect during polling ignores the late response')
             time.sleep(.3)
             window.connect_service()
+            window.timer.start()
             wait_for(lambda: window.online and window.job['job_id'] == jid and window.worker is None)
             checks.append('Disconnect/reconnect keeps the same recording task')
+            window.timer.stop()
+            window.poll()
             window.stop_recording()
+            assert window.pending_command[0] == '/v1/stop'
+            window.timer.start()
             wait_for(lambda: window.job['state'] == 'stopped')
             assert window.job['files']
             assert window.job['elapsed_s'] < 600

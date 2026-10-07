@@ -141,6 +141,8 @@ class Window(QMainWindow):
         self.setMinimumSize(1040, 730)
         self.job = None
         self.worker = None
+        self.pending_command = None
+        self.connection_generation = 0
         self.connected = False
         self.online = False
         self.pending_id = None
@@ -216,9 +218,15 @@ class Window(QMainWindow):
 
     def send(self, path, data=None):
         if self.worker is not None:
+            if (path != STATUS_PATH and self.worker.path == STATUS_PATH
+                    and self.pending_command is None):
+                self.pending_command = (path, data)
+                self.update_buttons()
+                return True
             return False
         base = 'http://'+self.host.text().strip().removeprefix('http://').rstrip('/')
         worker = Request(base, self.token.text(), path, data)
+        worker.connection_generation = self.connection_generation
         self.worker = worker
         worker.done.connect(self.received)
         worker.finished.connect(self.finished)
@@ -230,10 +238,16 @@ class Window(QMainWindow):
         worker = self.worker
         self.worker = None
         worker.deleteLater()
+        if self.pending_command is not None:
+            path, data = self.pending_command
+            self.pending_command = None
+            if self.connected:
+                self.send(path, data)
         self.update_buttons()
 
     def update_buttons(self):
-        busy = self.worker is not None
+        busy = (self.pending_command is not None
+                or (self.worker is not None and self.worker.path != STATUS_PATH))
         active = self.job and self.job['state'] in ACTIVE
         self.start_button.setEnabled(self.online and not active and not busy)
         self.stop_button.setEnabled(bool(self.online and active and not busy))
@@ -244,8 +258,10 @@ class Window(QMainWindow):
         self.start_button.setText('重试同一录制请求' if self.pending_id else '开始 10 分钟录制')
 
     def connect_service(self):
+        self.connection_generation += 1
         if self.connected:
             self.connected = self.online = False
+            self.pending_command = None
             self.status.setText('界面已断开；服务端任务如已启动会继续。重新连接可恢复状态。')
         else:
             self.connected = True
@@ -265,17 +281,23 @@ class Window(QMainWindow):
             self.send(STOP_PATH, dict(job_id=self.job['job_id']))
 
     def received(self, path, result, error):
+        if self.worker is not None and self.worker.connection_generation != self.connection_generation:
+            return
         if error:
             self.online = False
             self.badge.setText('连接或请求异常')
             self.status.setText('状态未确认，图形和倒计时冻结；自动重连中。'+error)
+            self.update_buttons()
             return
         self.online = True
         if path != STATUS_PATH:
+            self.job = result
             if path == START_PATH:
                 self.pending_id = None
+            self.update_buttons()
             return
         self.apply_snapshot(result)
+        self.update_buttons()
 
     def apply_snapshot(self, result):
         self.mode = result['mode']
