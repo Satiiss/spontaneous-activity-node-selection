@@ -79,7 +79,10 @@ def run():
             window.connect_service()
             wait_for(lambda: window.online and window.analysis['analysis_id'] == aid and window.worker is None)
             assert panel.table.rowCount() == result['candidate_count']
-            assert not panel.start_button.isEnabled()
+            assert panel.start_button.isEnabled()
+            assert panel.start_button.text() == '查看分析结果'
+            panel.start_button.click()
+            assert window.analysis['analysis_id'] == aid
             checks = ['Completed recording enables stage two', 'Queued analyze command survives status polling',
                 'Real worker stages and result render in second tab', 'Candidate order and selection match server',
                 'Reconnect restores same result without rerunning analysis', 'Both window sizes render']

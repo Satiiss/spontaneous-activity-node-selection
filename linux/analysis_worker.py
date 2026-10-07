@@ -93,6 +93,10 @@ def analyze_file(path, output, config, mode, well=0, expected_mapping=None, expe
         mapping_count=len(session.channel_to_electrode), burst_count=len(result['bursts']),
         edge_count=len(result['edges']), candidate_count=len(candidates), threshold=threshold,
         candidates=candidates, electrodes=records(result['electrodes']),
+        mapping=[dict(channel=ch, electrode=ele, x=session.channel_positions_um[ch][0],
+                      y=session.channel_positions_um[ch][1])
+                 for ch, ele in session.channel_to_electrode.items()
+                 if ch >= 0 and ch in session.channel_positions_um],
         burst_preview=records(result['burst_table'].head(500)),
         files=[str(output/(key+'.csv')) for key in ('electrodes', 'edges', 'burst_table', 'activation')],
         note='自发先后关系用于筛选候选，未进行刺激标定。')
@@ -110,9 +114,16 @@ def main():
     parser.add_argument('--input', required=True)
     parser.add_argument('--output', required=True)
     parser.add_argument('--config', required=True)
-    parser.add_argument('--mode', choices=['mock', 'maxlab'], required=True)
-    parser.add_argument('--session', required=True)
+    parser.add_argument('--mode', choices=['mock', 'maxlab', 'file'], required=True)
+    parser.add_argument('--session')
     args = parser.parse_args()
+    if args.mode == 'file':
+        if args.session:
+            parser.error('file mode does not use a recording manifest')
+        analyze_file(args.input, args.output, load_config(args.config), 'file')
+        return
+    if not args.session:
+        parser.error('recording analysis requires --session')
     job = json.loads(Path(args.session).read_text('utf-8'))
     if job['state'] != 'completed':
         raise ValueError('录制必须完成后才能分析')

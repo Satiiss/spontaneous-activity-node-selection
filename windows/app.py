@@ -15,12 +15,13 @@ from shared.protocol import (ACTIVE_STATES, DEFAULT_DURATION_S, DEFAULT_PORT,
                              ANALYZE_PATH, ANALYSIS_STOP_PATH, ANALYSIS_ACTIVE_STATES)
 from .analysis_panel import AnalysisPanel
 from .connection import DEFAULT_HOST, connection_defaults
+from .local_analysis import LocalAnalysis
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal, QRectF
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QPainter, QPen
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QLabel, QPushButton,
     QLineEdit, QHBoxLayout, QVBoxLayout, QGridLayout, QProgressBar, QTableWidget,
-    QTableWidgetItem, QHeaderView, QSplitter, QMessageBox, QAbstractItemView, QTabWidget)
+    QTableWidgetItem, QHeaderView, QSplitter, QMessageBox, QAbstractItemView, QTabWidget, QFileDialog)
 
 ROOT = Path(__file__).resolve().parent
 ACTIVE = ACTIVE_STATES
@@ -154,6 +155,9 @@ class Window(QMainWindow):
         self.analysis_supported = False
         self.analysis_request_id = None
         self.shown_analysis_id = None
+        self.local_analysis = LocalAnalysis(self)
+        self.local_analysis.changed.connect(self.local_analysis_changed)
+        self.local_visible = False
         root = QWidget()
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
@@ -195,6 +199,7 @@ class Window(QMainWindow):
         self.analysis_panel = AnalysisPanel()
         self.analysis_panel.start_requested.connect(self.start_analysis)
         self.analysis_panel.cancel_requested.connect(self.stop_analysis)
+        self.analysis_panel.file_requested.connect(self.select_existing_file)
         self.tabs.addTab(self.analysis_panel, '② 高出度候选')
         layout.addWidget(self.tabs, 1)
         metrics = QHBoxLayout()
@@ -266,7 +271,7 @@ class Window(QMainWindow):
                 or (self.worker is not None and self.worker.path != STATUS_PATH))
         active = self.job and self.job['state'] in ACTIVE
         analysis_active = self.analysis and self.analysis['state'] in ANALYSIS_ACTIVE_STATES
-        self.start_button.setEnabled(self.online and not active and not analysis_active and not busy)
+        self.start_button.setEnabled(self.online and not active and not analysis_active and not busy and not self.local_analysis.active)
         self.stop_button.setEnabled(bool(self.online and active and not busy))
         self.connect_button.setEnabled(not busy)
         self.host.setEnabled(not self.connected)
@@ -274,6 +279,11 @@ class Window(QMainWindow):
         self.connect_button.setText('断开界面连接' if self.connected else '连接服务')
         self.start_button.setText('重试同一录制请求' if self.pending_id else '开始 10 分钟录制')
         self.analysis_panel.refresh_buttons(self.job, self.analysis, self.online, busy, self.analysis_supported)
+        self.analysis_panel.file_button.setEnabled(not active and not analysis_active and not busy and not self.local_analysis.active)
+        if self.local_visible:
+            self.analysis_panel.start_button.setText('查看 Linux 分析')
+            self.analysis_panel.start_button.setEnabled(self.online and not busy and not self.local_analysis.active)
+            self.analysis_panel.cancel_button.setEnabled(self.local_analysis.active and self.local_analysis.status['state'] != 'cancelling')
 
     def connect_service(self):
         self.connection_generation += 1
@@ -299,13 +309,57 @@ class Window(QMainWindow):
             self.send(STOP_PATH, dict(job_id=self.job['job_id']))
 
     def start_analysis(self):
+        if self.local_visible:
+            self.local_visible = False
+            self.show_analysis()
+            self.update_buttons()
+            return
+        if self.analysis and self.analysis['state'] == 'completed':
+            self.tabs.setCurrentIndex(1)
+            self.show_analysis()
+            return
         if self.job:
             self.analysis_request_id = self.analysis_request_id or uuid.uuid4().hex
             self.send(ANALYZE_PATH, dict(job_id=self.job['job_id'], request_id=self.analysis_request_id))
 
     def stop_analysis(self):
+        if self.local_visible:
+            self.local_analysis.cancel()
+            return
         if self.job and self.analysis:
             self.send(ANALYSIS_STOP_PATH, dict(job_id=self.job['job_id'], analysis_id=self.analysis['analysis_id']))
+
+    def select_existing_file(self):
+        path, _ = QFileDialog.getOpenFileName(self, '选择已有自发记录 H5', '', 'H5 文件 (*.h5 *.hdf5)')
+        if path:
+            self.analyze_local_file(path)
+
+    def analyze_local_file(self, path):
+        if self.local_analysis.active or (self.analysis and self.analysis['state'] in ANALYSIS_ACTIVE_STATES):
+            return
+        self.local_visible = True
+        self.tabs.setCurrentIndex(1)
+        try:
+            self.local_analysis.start(path)
+        except Exception as exc:
+            self.local_visible = False
+            QMessageBox.warning(self, '无法分析文件', str(exc))
+            self.show_analysis()
+        self.update_buttons()
+
+    def local_analysis_changed(self, status):
+        if self.local_visible:
+            self.show_analysis()
+        self.update_buttons()
+
+    def show_analysis(self):
+        if self.local_visible and self.local_analysis.status:
+            analysis = self.local_analysis.status
+            result = analysis.get('result') or {}
+            job = dict(job_id=analysis['job_id'], mapping=result.get('mapping', []), mode='file')
+            self.analysis_panel.show_status(analysis, job, True)
+        else:
+            self.analysis_panel.show_status(self.analysis, self.job, self.analysis_supported)
 
     def received(self, path, result, error):
         if self.worker is not None and self.worker.connection_generation != self.connection_generation:
@@ -322,14 +376,15 @@ class Window(QMainWindow):
                 self.analysis = result
                 if path == ANALYZE_PATH:
                     self.analysis_request_id = None
-                self.analysis_panel.show_status(self.analysis, self.job, self.analysis_supported)
+                self.show_analysis()
             else:
                 self.job = result
             if path == START_PATH:
                 self.pending_id = None
                 self.analysis = None
+                self.local_visible = False
                 self.analysis_request_id = None
-                self.analysis_panel.show_status(None, self.job, self.analysis_supported)
+                self.show_analysis()
                 self.tabs.setCurrentIndex(0)
             self.update_buttons()
             return
@@ -342,8 +397,8 @@ class Window(QMainWindow):
         self.job = job = result.get('job')
         self.analysis_supported = 'candidate_analysis_v1' in result.get('capabilities', [])
         self.analysis = result.get('analysis')
-        self.analysis_panel.show_status(self.analysis, job, self.analysis_supported)
-        if self.analysis and self.analysis.get('analysis_id') and self.analysis['analysis_id'] != self.shown_analysis_id:
+        self.show_analysis()
+        if not self.local_visible and self.analysis and self.analysis.get('analysis_id') and self.analysis['analysis_id'] != self.shown_analysis_id:
             self.shown_analysis_id = self.analysis['analysis_id']
             self.tabs.setCurrentIndex(1)
         if job is None:
@@ -385,6 +440,7 @@ class Window(QMainWindow):
                 event.ignore()
                 return
         self.timer.stop()
+        self.local_analysis.close()
         self.pending_command = None
         if self.worker:
             self.worker.wait(5000)

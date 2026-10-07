@@ -24,6 +24,7 @@ jobs:
       - run: python -m pip install -r windows/requirements.txt -r linux/requirements.txt
       - run: python -m tests.verify_ui
       - run: python -m tests.verify_analysis_ui
+      - run: python -m tests.verify_local_analysis_ui
   passive-reader:
     runs-on: ubuntu-latest
     steps:

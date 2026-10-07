@@ -34,6 +34,10 @@ py -3.12 -m venv .venv
 
 完整录制保存成功后自动进入“② 高出度候选”。旧版本留下的完整录制可在第二页点击“分析已完成的录制”。提前停止、失败或中断的录制不进入候选分析。
 
+第二页的“选择已有 H5”可直接分析 Windows 上已有的自发记录文件，不需要连接或上传到 Linux。选择文件后，本机后台进程调用与 Linux 完全相同的 `linux.analysis_worker` 和 `linux/analysis.yaml`，进度、候选表及位置图继续在原页面显示。原 H5 只读，结果保存在本机 `data/local-analysis/<分析ID>/`。已完成的远程任务按钮显示“查看分析结果”；本地结果显示期间该按钮用于“查看 Linux 分析”。“取消分析”只在任务运行期间可用。
+
+本地分析默认使用启动 Windows 界面的 Python，因此已有安装需要重新执行 `python -m pip install -r windows/requirements.txt`。可用 `OBSERVER_ANALYSIS_PYTHON` 指定已安装分析依赖的其他 Python。此入口默认读取 well000 的第一个记录段，适用于已结束的自发记录，不会进行录制或刺激。
+
 默认服务地址为 `172.16.14.73:8765`，可在界面修改。token 可存入本机 `windows/connection.local.json`（Git 忽略）：`{"host":"172.16.14.73:8765","token":"你的服务端token"}`，下次启动自动填入。环境变量 `OBSERVER_HOST` / `OBSERVER_TOKEN` 优先于本机文件，命令行参数优先于环境变量。IP 可能因网络变化而改变；token 取决于 Linux 启动时指定的值，不会由软件自动轮换。
 
 仅本机 mock 自检时，再安装服务依赖：
@@ -103,6 +107,7 @@ Windows 需要 UI 测试时：
 .\.venv\Scripts\python.exe -m pip install -r windows\requirements.txt -r linux\requirements.txt
 .\.venv\Scripts\python.exe -m tests.verify_ui
 .\.venv\Scripts\python.exe -m tests.verify_analysis_ui
+.\.venv\Scripts\python.exe -m tests.verify_local_analysis_ui
 ```
 
 图形测试在隔离的本地 mock 服务上运行，结果写入被 Git 忽略的 `artifacts/validation/`。CI 配置包含 Linux/Windows 服务测试、Windows 离屏 UI 联调和 Linux C++ mock 构建；云端执行结果以 Actions 为准。

@@ -64,6 +64,7 @@ class CandidateMap(QWidget):
 class AnalysisPanel(QWidget):
     start_requested = Signal()
     cancel_requested = Signal()
+    file_requested = Signal()
 
     def __init__(self):
         super().__init__()
@@ -79,9 +80,12 @@ class AnalysisPanel(QWidget):
         top.addStretch()
         self.start_button = QPushButton('分析已完成的录制')
         self.cancel_button = QPushButton('取消分析')
+        self.file_button = QPushButton('选择已有 H5')
+        self.file_button.clicked.connect(self.file_requested.emit)
         self.start_button.clicked.connect(self.start_requested.emit)
         self.cancel_button.clicked.connect(self.cancel_requested.emit)
         top.addWidget(self.start_button)
+        top.addWidget(self.file_button)
         top.addWidget(self.cancel_button)
         layout.addLayout(top)
         self.status = QLabel('完整录制保存后自动分析')
@@ -131,9 +135,12 @@ class AnalysisPanel(QWidget):
     def refresh_buttons(self, job, analysis, online, busy, supported):
         state = analysis.get('state') if analysis else 'idle'
         available = bool(online and supported and job and job['state'] == 'completed')
-        self.start_button.setEnabled(available and not busy and state not in ANALYSIS_ACTIVE_STATES and state != 'completed')
+        self.start_button.setEnabled(available and not busy and state not in ANALYSIS_ACTIVE_STATES)
         self.cancel_button.setEnabled(available and not busy and state in ('queued', 'running'))
-        self.start_button.setText('重新分析' if state in ('failed', 'cancelled', 'interrupted') else '分析已完成的录制')
+        self.start_button.setText('查看分析结果' if state == 'completed' else
+            '重新分析' if state in ('failed', 'cancelled', 'interrupted') else '分析已完成的录制')
+        self.start_button.setToolTip('完整录制完成后可分析；已完成时查看保存的结果')
+        self.cancel_button.setToolTip('仅在分析运行期间可取消')
 
     def show_status(self, analysis, job, supported):
         signature = (job.get('job_id') if job else None,
@@ -158,11 +165,13 @@ class AnalysisPanel(QWidget):
             for chip in self.stage_labels:
                 chip.setStyleSheet('color:#8fa8c5;padding:8px;')
             return
-        mode = '模拟数据' if analysis.get('mode', job.get('mode') if job else None) == 'mock' else '真实数据'
+        mode = ('本地 H5' if analysis.get('origin') == 'local' else
+                '模拟数据' if analysis.get('mode', job.get('mode') if job else None) == 'mock' else '真实数据')
         details = ''
         if analysis.get('stage') == 'connections':
             details = f" · 电极对 {analysis.get('pairs_done', 0):,} / {analysis.get('pairs_total', 0):,}"
-        self.status.setText(mode+' · '+analysis['message']+details)
+        self.status.setText(mode+' · '+analysis['message']+details+
+            (' · '+analysis['source_h5'] if analysis.get('origin') == 'local' else ''))
         if analysis.get('error'):
             self.status.setText(self.status.text()+' · '+analysis['error'])
         self.progress.setValue(round(analysis.get('progress', 0)*10))
@@ -198,6 +207,7 @@ class AnalysisPanel(QWidget):
         elif not result:
             self.result = None
             self.table.setRowCount(0)
+            self.summary.setText('Burst —    有向关系 —    候选 —    出度阈值 —')
             self.map.set_data(None, self.mapping)
             self.output.setText('本次分析仅确定候选，刺激标定尚未开始。')
 
