@@ -16,8 +16,10 @@ import uuid
 import h5py
 import numpy as np
 from .acquisition import MockSource, MaxlabSource
+from .analysis import AnalysisTask
 from shared.protocol import (ACTIVE_STATES, DEFAULT_DURATION_S, DEFAULT_PORT,
-                             PROTOCOL_VERSION, START_PATH, STATUS_PATH, STOP_PATH)
+                             PROTOCOL_VERSION, START_PATH, STATUS_PATH, STOP_PATH,
+                             ANALYZE_PATH, ANALYSIS_STOP_PATH, ANALYSIS_ACTIVE_STATES)
 
 ACTIVE = ACTIVE_STATES
 SPIKE_DTYPE = np.dtype([('frameno', '<i8'), ('channel', '<i4'), ('amplitude', '<f4')])
@@ -47,7 +49,7 @@ def verify_native(paths, mapping, rate, well):
 
 
 class Recorder:
-    def __init__(self, root, mode='mock', config=None):
+    def __init__(self, root, mode='mock', config=None, auto_analyze=True, analysis_config=None):
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.mode, self.config = mode, config or {}
@@ -57,6 +59,9 @@ class Recorder:
         self.events = deque()
         self.requests = {}
         self.hardware_fault = False
+        self.auto_analyze = auto_analyze
+        self.analysis_config = Path(analysis_config or Path(__file__).parent/'analysis.yaml')
+        self.analysis = None
         # Restart never resumes recording implicitly. Preserve interrupted evidence.
         for path in sorted(self.root.glob('*/session.json'), key=lambda p: p.stat().st_mtime):
             job = json.loads(path.read_text('utf-8'))
@@ -69,6 +74,8 @@ class Recorder:
             if job['mode'] == 'maxlab' and job['state'] in ('failed', 'interrupted'):
                 self.hardware_fault = True
             self.job = job
+        if self.job:
+            self.analysis = AnalysisTask(self.job, self.analysis_config)
 
     def _persist(self):
         write_json(Path(self.job['directory'])/'session.json', self.job)
@@ -90,6 +97,8 @@ class Recorder:
                 raise ValueError('硬件故障锁定：现场核对停止状态后按 README 恢复')
             if self.job and self.job['state'] in ACTIVE:
                 raise ValueError('已有录制任务运行')
+            if self.analysis and self.analysis.snapshot()['state'] in ANALYSIS_ACTIVE_STATES:
+                raise ValueError('候选分析正在运行，请等待或取消分析后再录制')
             estimate = int(duration*self.config.get('sample_rate', 20000)*1024*2*1.3) if self.mode == 'maxlab' else 128*1024**2
             if shutil.disk_usage(self.root).free < estimate + 256*1024**2:
                 raise ValueError('录制目录剩余空间不足')
@@ -100,7 +109,9 @@ class Recorder:
             self.job = dict(job_id=jid, request_id=request_id, mode=self.mode, state='starting',
                 duration_s=duration, elapsed_s=0., acquired_s=0., total_spikes=0, error='',
                 directory=str(directory), files=[], mapping=source.mapping, sample_rate=source.rate,
-                created_at=time.strftime('%Y-%m-%dT%H:%M:%S%z'), window_s=0., first_frame=None)
+                created_at=time.strftime('%Y-%m-%dT%H:%M:%S%z'), window_s=0., first_frame=None,
+                well=self.config.get('well', 0))
+            self.analysis = None
             self.requests[request_id] = self.job
             self.events.clear()
             self.stop_event.clear()
@@ -108,6 +119,35 @@ class Recorder:
             self.thread = threading.Thread(target=self._run, args=(source, directory), daemon=False)
             self.thread.start()
             return dict(self.job)
+
+    def analyze(self, jid, request_id):
+        if not isinstance(request_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{8,80}', request_id):
+            raise ValueError('invalid analysis request_id')
+        with self.lock:
+            if not self.job or jid != self.job['job_id']:
+                raise ValueError('job_id does not match current recording')
+            if self.job['state'] != 'completed':
+                raise ValueError('录制保存成功后才能分析，提前停止的记录不可用')
+            if self.analysis is None:
+                self.analysis = AnalysisTask(self.job, self.analysis_config)
+            try:
+                return self.analysis.start(request_id)
+            except Exception as exc:
+                # Keep the recording successful even if analysis setup fails.
+                with self.analysis.lock:
+                    self.analysis.status.update(state='failed', message='分析启动失败，可以重试', error=str(exc))
+                    self.analysis._persist()
+                raise
+
+    def cancel_analysis(self, jid, aid):
+        with self.lock:
+            if not self.job or jid != self.job['job_id'] or not self.analysis:
+                raise ValueError('no matching analysis task')
+            return self.analysis.cancel(aid)
+
+    def wait_analysis(self, timeout=None):
+        if self.analysis and self.analysis.thread:
+            self.analysis.thread.join(timeout)
 
     def stop(self, jid):
         with self.lock:
@@ -120,7 +160,9 @@ class Recorder:
 
     def snapshot(self):
         with self.lock:
-            result = dict(protocol=PROTOCOL_VERSION, mode=self.mode, hardware_fault=self.hardware_fault, job=None)
+            result = dict(protocol=PROTOCOL_VERSION, mode=self.mode, hardware_fault=self.hardware_fault, job=None,
+                          capabilities=['candidate_analysis_v1'],
+                          analysis=self.analysis.snapshot() if self.analysis else None)
             if not self.job:
                 return result
             job = dict(self.job)
@@ -232,6 +274,11 @@ class Recorder:
                 preview = self.snapshot()['job']
                 self.job['preview'] = {k: preview[k] for k in ('rates', 'raster', 'raster_total', 'raster_sampled')}
                 self._persist()
+                if state == 'completed' and self.auto_analyze:
+                    try:
+                        self.analyze(self.job['job_id'], 'auto-'+self.job['job_id'])
+                    except Exception:
+                        pass  # analysis errors have their own state; recording remains completed
 
 
 def make_server(recorder, host, port, token):
@@ -261,6 +308,10 @@ def make_server(recorder, host, port, token):
                         result = recorder.start(data['request_id'], data.get('duration_s', DEFAULT_DURATION_S))
                     elif self.path == STOP_PATH:
                         result = recorder.stop(data['job_id'])
+                    elif self.path == ANALYZE_PATH:
+                        result = recorder.analyze(data['job_id'], data['request_id'])
+                    elif self.path == ANALYSIS_STOP_PATH:
+                        result = recorder.cancel_analysis(data['job_id'], data['analysis_id'])
                     else:
                         return self.reply(404, {'error': 'unknown command'})
                 elif self.path == STATUS_PATH:
@@ -294,13 +345,16 @@ def main():
     parser.add_argument('--output', default=str(Path(__file__).resolve().parents[1]/'data'/'recordings'))
     parser.add_argument('--token', required=True)
     parser.add_argument('--config')
+    parser.add_argument('--analysis-config', default=str(Path(__file__).parent/'analysis.yaml'))
+    parser.add_argument('--no-auto-analysis', action='store_true')
     args = parser.parse_args()
     if len(args.token) < 16:
         parser.error('token must have at least 16 characters')
     if args.mode == 'maxlab' and not args.config:
         parser.error('--mode maxlab requires --config')
     config = json.loads(Path(args.config).read_text('utf-8')) if args.config else {}
-    recorder = Recorder(args.output, args.mode, config)
+    recorder = Recorder(args.output, args.mode, config, auto_analyze=not args.no_auto_analysis,
+                        analysis_config=args.analysis_config)
     server = make_server(recorder, args.host, args.port, args.token)
     print(f'Observer {args.mode}: http://{args.host}:{server.server_port} ; {recorder.root}', flush=True)
     try:
@@ -312,6 +366,9 @@ def main():
             recorder.stop(recorder.job['job_id'])
         if recorder.thread:
             recorder.thread.join()
+        if recorder.analysis and recorder.analysis.snapshot()['state'] in ANALYSIS_ACTIVE_STATES:
+            recorder.cancel_analysis(recorder.job['job_id'], recorder.analysis.snapshot()['analysis_id'])
+        recorder.wait_analysis()
         server.server_close()
 
 

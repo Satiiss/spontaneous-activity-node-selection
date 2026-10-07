@@ -1,0 +1,35 @@
+# 第二阶段算法配置；输入和输出由当前录制会话确定。
+
+burst:
+  bin_ms: 1.0
+  smooth_ms: 50.0
+  threshold_z: 6.0
+  min_duration_ms: 30.0
+  merge_gap_ms: 30.0
+  min_spikes: 5
+
+stable_activation:
+  # 各电极“每个Burst首次激活时间”直方图的bin宽。
+  histogram_bin_ms: 1.0
+  # 主峰计数/非零bin计数中位数达到该值，定义为稳定激活电极。
+  peak_ratio_threshold: 10.0
+
+directed_connection:
+  # 两电极首次激活时间差直方图bin宽。
+  delay_bin_ms: 1.0
+  # 延迟直方图主峰计数/非零bin计数中位数阈值。
+  peak_ratio_threshold: 20.0
+  # 严格沿用原程序：共同Burst数量必须 > 此值，而不是 >=。
+  min_shared_bursts: 30
+  # 延迟绝对值小于等于该值不定向，以降低近同步误判为先后关系。
+  min_absolute_delay_ms: 5.0
+
+high_outdegree:
+  # percentile：按出度分位数；top_n：取前N；absolute：固定最低出度。
+  method: "percentile"
+  percentile: 90.0
+  top_n: 20
+  minimum_outdegree: 1
+  # true时，高出度候选还必须属于稳定激活电极。
+  require_stable_activation: false
+

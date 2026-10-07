@@ -7,3 +7,6 @@ ACTIVE_STATES = frozenset({'starting', 'recording', 'stopping', 'finalizing'})
 STATUS_PATH = '/v1/status'
 START_PATH = '/v1/start'
 STOP_PATH = '/v1/stop'
+ANALYZE_PATH = '/v1/analyze'
+ANALYSIS_STOP_PATH = '/v1/analysis/stop'
+ANALYSIS_ACTIVE_STATES = frozenset({'queued', 'running', 'cancelling'})

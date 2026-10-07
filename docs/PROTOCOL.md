@@ -58,3 +58,27 @@ request_id 为 8–80 位字母、数字、下划线或连字符。返回任务�
 200：成功；400：非法参数、重复参数冲突或任务冲突；401：token 不匹配；404：端点不存在；500：内部异常。错误体 `{"error":"原因"}`。后台采集/保存失败通过 job.state 和 job.error 报告。
 
 没有文件上传/下载、设备初始化、路由切换或刺激端点。
+
+## 第二阶段分析（v1 增量扩展）
+
+状态响应新增 `capabilities: ["candidate_analysis_v1"]` 和 `analysis`（未创建时为 null）。旧客户端可以忽略新增字段；新客户端连接旧服务时禁用分析按钮并提示更新 Linux。
+
+`POST /v1/analyze` 请求：
+
+```json
+{"job_id":"server-issued-job-id","request_id":"client-unique-analysis-id"}
+```
+
+只允许当前 completed 录制。自动分析使用相同任务机制。相同请求或正在分析的录制返回现有任务；completed 结果直接返回缓存。取消、失败、中断后用新 request_id 重试。分析进行中拒绝开始新录制。
+
+`POST /v1/analysis/stop` 请求：
+
+```json
+{"job_id":"server-issued-job-id","analysis_id":"server-issued-analysis-id"}
+```
+
+收到取消请求后继续查询直到 cancelled，取消不会修改原始录制。
+
+analysis 字段包含 state（idle、queued、running、cancelling、cancelled、failed、interrupted、completed）、job_id、analysis_id、mode、stage、progress（0–100）、message、error、log、source_h5、directory 和 result。connections 阶段提供 pairs_done / pairs_total。进度日志保留最近 150 条事件。
+
+completed 的 result 包含 spike_count、active_channels、mapping_count、burst_count、edge_count、candidate_count、threshold、candidates、electrodes、burst_preview、files、config 和 algorithm_sha256。candidates 顺序由算法排序确定，包含 channel、electrode、x_um、y_um、out_degree、in_degree、out_minus_in、burst_participation 等。文件路径均属于 Linux，不是 Windows 下载路径。threshold 可以为 null，候选列表可以为空。

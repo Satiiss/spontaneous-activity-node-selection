@@ -2,9 +2,9 @@
 
 Windows 操作端与 Linux Maxwell 采集端放在同一个仓库，使用统一版本的 HTTP 协议。
 
-当前已实现第一阶段：600 秒自发观测任务、倒计时、实时放电栅格图、电极活动热力图、全部映射通道放电率、停止保存、断线恢复与 H5 事件存档。
+当前已实现两个阶段：① 600 秒自发观测、实时图形与 H5 存档；② Linux 自动分析高出度候选，Windows 在同一窗口显示分析进度、候选表和电极空间位置。
 
-**mock 软件链路已经过本地验证；真实 Maxwell 采集适配器尚未完成 Linux 现场验收。** 初始化、ActivityScan 和路由准备由现场 MaxLab 完成。本阶段没有刺激操作。项目名称中的“节点筛选”是后续阶段，当前仓库尚未接入候选分析、刺激标定或猜拳。
+**mock 软件链路和历史真实 H5 的候选分析已经过本地验证；真实 Maxwell 采集适配器尚未完成 Linux 现场验收。** 初始化、ActivityScan 和路由准备由现场 MaxLab 完成。当前没有刺激标定或猜拳操作。
 
 ## 目录
 
@@ -31,6 +31,8 @@ py -3.12 -m venv .venv
 ```
 
 之后可双击 `windows/start.bat`。填写 Linux 当前 IP 与端口 `8765`，输入服务端配置的 token，点击“连接服务”→“开始 10 分钟录制”。Linux 上用 `hostname -I` 核对地址。
+
+完整录制保存成功后自动进入“② 高出度候选”。旧版本留下的完整录制可在第二页点击“分析已完成的录制”。提前停止、失败或中断的录制不进入候选分析。
 
 仅本机 mock 自检时，再安装服务依赖：
 
@@ -64,11 +66,33 @@ python3 -m venv .venv
 
 详细说明：[架构](docs/ARCHITECTURE.md) · [协议](docs/PROTOCOL.md) · [验证范围](docs/VALIDATION.md)。
 
+## 第二阶段：高出度候选
+
+Linux 子进程依次读取完整 Spike 文件、检测 Burst、计算首次激活与稳定先后关系、统计出度并保存候选。Windows 显示实际步骤进度及已计算的电极对数量；结果包含电极 ID、通道、出度、入度、出度－入度、Burst 参与率和空间位置。选择表格行会高亮对应电极。
+
+分析沿用原 `spont_burst_outdegree` 算法，参数在 `linux/analysis.yaml`：共同 Burst 数严格大于 30、延迟直方图主峰计数与非零 bin 计数中位数的比值至少 20、绝对延迟严格大于 5 ms；默认按有出度电极的第 90 百分位筛选。阈值和候选数量来自本次数据，不固定为 33 或三个电极。候选表示自发活动中的稳定先后关系，尚未经过刺激验证。
+
+mock 分析 `spikes.h5`，真实模式分析官方 `native*.h5`，坐标使用该 H5 的电极映射。结果保存在当前录制目录的 `analysis/<分析ID>/`：`result.json`、四张 CSV、参数快照、录制清单和进程日志。原始记录保留。无候选也是有效结果。
+
+断开 Windows 不影响分析；重新连接恢复同一结果。取消或失败后可重新分析。Linux 服务重启会将进行中的分析标记为中断，不自动重复运行。分析期间不能启动下一次录制。可用 `--no-auto-analysis` 关闭自动触发，用 `--analysis-config PATH` 指定参数文件。
+
+更新已有 Linux 部署时，先在服务终端按 Ctrl+C，然后：
+
+```bash
+cd /home/maxwell/Software/Hzl/spontaneous-activity-node-selection
+git pull --ff-only
+.venv/bin/python -m pip install -r linux/requirements.txt
+.venv/bin/python -m linux.service --mode mock --host 0.0.0.0 --port 8765 \
+  --token "$OBSERVER_TOKEN" --output "$PWD/data/mock-recordings"
+```
+
+保留原来的输出目录才能恢复上一次录制；token 环境变量须至少 16 字符。真实采集仍按现场部署文档和实际核验后的配置启动。
+
 ## 开发与验证
 
 ```bash
 python -m pip install -r linux/requirements.txt
-python -m unittest -v tests.test_service
+python -m unittest -v tests.test_service tests.test_analysis
 ```
 
 Windows 需要 UI 测试时：
@@ -76,6 +100,7 @@ Windows 需要 UI 测试时：
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r windows\requirements.txt -r linux\requirements.txt
 .\.venv\Scripts\python.exe -m tests.verify_ui
+.\.venv\Scripts\python.exe -m tests.verify_analysis_ui
 ```
 
 图形测试在隔离的本地 mock 服务上运行，结果写入被 Git 忽略的 `artifacts/validation/`。CI 配置包含 Linux/Windows 服务测试、Windows 离屏 UI 联调和 Linux C++ mock 构建；云端执行结果以 Actions 为准。

@@ -17,7 +17,7 @@ from linux.service import Recorder, make_server
 class RecordingTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.rec = Recorder(self.tmp.name)
+        self.rec = Recorder(self.tmp.name, auto_analyze=False)
 
     def tearDown(self):
         if self.rec.thread and self.rec.thread.is_alive():
@@ -155,7 +155,7 @@ class RecordingTests(unittest.TestCase):
 class HttpTests(unittest.TestCase):
     def test_reconnect_recovers_same_job_and_auth(self):
         with tempfile.TemporaryDirectory() as root:
-            rec = Recorder(root)
+            rec = Recorder(root, auto_analyze=False)
             server = make_server(rec, '127.0.0.1', 0, 'test-secret-token')
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()

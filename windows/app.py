@@ -11,13 +11,15 @@ import urllib.error
 import uuid
 
 from shared.protocol import (ACTIVE_STATES, DEFAULT_DURATION_S, DEFAULT_PORT,
-                             PROTOCOL_VERSION, START_PATH, STATUS_PATH, STOP_PATH)
+                             PROTOCOL_VERSION, START_PATH, STATUS_PATH, STOP_PATH,
+                             ANALYZE_PATH, ANALYSIS_STOP_PATH, ANALYSIS_ACTIVE_STATES)
+from .analysis_panel import AnalysisPanel
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal, QRectF
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QPainter, QPen
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QLabel, QPushButton,
     QLineEdit, QHBoxLayout, QVBoxLayout, QGridLayout, QProgressBar, QTableWidget,
-    QTableWidgetItem, QHeaderView, QSplitter, QMessageBox, QAbstractItemView)
+    QTableWidgetItem, QHeaderView, QSplitter, QMessageBox, QAbstractItemView, QTabWidget)
 
 ROOT = Path(__file__).resolve().parent
 ACTIVE = ACTIVE_STATES
@@ -136,7 +138,7 @@ def panel(title, widget):
 class Window(QMainWindow):
     def __init__(self, host=f'127.0.0.1:{DEFAULT_PORT}', token=''):
         super().__init__()
-        self.setWindowTitle('Spontaneous Observer · 自发电活动观测')
+        self.setWindowTitle('Spontaneous Observer · 自发观测与候选分析')
         self.resize(1340, 860)
         self.setMinimumSize(1040, 730)
         self.job = None
@@ -147,13 +149,17 @@ class Window(QMainWindow):
         self.online = False
         self.pending_id = None
         self.mode = None
+        self.analysis = None
+        self.analysis_supported = False
+        self.analysis_request_id = None
+        self.shown_analysis_id = None
         root = QWidget()
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
         layout.setContentsMargins(24, 20, 24, 18)
         layout.setSpacing(12)
         top = QHBoxLayout()
-        title = QLabel('自发电活动观测')
+        title = QLabel('自发观测与候选分析')
         title.setObjectName('title')
         top.addWidget(title)
         top.addWidget(QLabel('SPONTANEOUS OBSERVER  /  01'))
@@ -181,6 +187,15 @@ class Window(QMainWindow):
         self.status = QLabel('先连接 Linux 采集服务；首次使用可运行独立 mock 自检。')
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        self.tabs = QTabWidget()
+        observation = QWidget()
+        observation_layout = QVBoxLayout(observation)
+        self.tabs.addTab(observation, '① 自发观测')
+        self.analysis_panel = AnalysisPanel()
+        self.analysis_panel.start_requested.connect(self.start_analysis)
+        self.analysis_panel.cancel_requested.connect(self.stop_analysis)
+        self.tabs.addTab(self.analysis_panel, '② 高出度候选')
+        layout.addWidget(self.tabs, 1)
         metrics = QHBoxLayout()
         self.time_label = QLabel('10:00')
         self.state_label = QLabel('待开始')
@@ -190,14 +205,14 @@ class Window(QMainWindow):
                                ('累计 Spike', self.count_label), ('活动 / 映射通道', self.channel_label)]:
             widget.setObjectName('metric')
             metrics.addWidget(panel(label, widget))
-        layout.addLayout(metrics)
+        observation_layout.addLayout(metrics)
         self.progress = QProgressBar()
         self.progress.setRange(0, 6000)
         self.progress.setTextVisible(False)
         self.progress.setFixedHeight(6)
-        layout.addWidget(self.progress)
+        observation_layout.addWidget(self.progress)
         self.raster, self.heat = Plot('raster'), Plot('heat')
-        layout.addWidget(panel('实时放电栅格图', self.raster), 1)
+        observation_layout.addWidget(panel('实时放电栅格图', self.raster), 1)
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(['通道 CH', '电极 ID', '放电率 Hz'])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
@@ -209,7 +224,7 @@ class Window(QMainWindow):
         bottom.addWidget(panel('电极活动热力图', self.heat))
         bottom.addWidget(panel('各通道放电率', self.table))
         bottom.setSizes([740, 460])
-        layout.addWidget(bottom, 1)
+        observation_layout.addWidget(bottom, 1)
         self.timer = QTimer(self)
         self.timer.setInterval(250)
         self.timer.timeout.connect(self.poll)
@@ -249,13 +264,15 @@ class Window(QMainWindow):
         busy = (self.pending_command is not None
                 or (self.worker is not None and self.worker.path != STATUS_PATH))
         active = self.job and self.job['state'] in ACTIVE
-        self.start_button.setEnabled(self.online and not active and not busy)
+        analysis_active = self.analysis and self.analysis['state'] in ANALYSIS_ACTIVE_STATES
+        self.start_button.setEnabled(self.online and not active and not analysis_active and not busy)
         self.stop_button.setEnabled(bool(self.online and active and not busy))
         self.connect_button.setEnabled(not busy)
         self.host.setEnabled(not self.connected)
         self.token.setEnabled(not self.connected)
         self.connect_button.setText('断开界面连接' if self.connected else '连接服务')
         self.start_button.setText('重试同一录制请求' if self.pending_id else '开始 10 分钟录制')
+        self.analysis_panel.refresh_buttons(self.job, self.analysis, self.online, busy, self.analysis_supported)
 
     def connect_service(self):
         self.connection_generation += 1
@@ -280,6 +297,15 @@ class Window(QMainWindow):
         if self.job:
             self.send(STOP_PATH, dict(job_id=self.job['job_id']))
 
+    def start_analysis(self):
+        if self.job:
+            self.analysis_request_id = self.analysis_request_id or uuid.uuid4().hex
+            self.send(ANALYZE_PATH, dict(job_id=self.job['job_id'], request_id=self.analysis_request_id))
+
+    def stop_analysis(self):
+        if self.job and self.analysis:
+            self.send(ANALYSIS_STOP_PATH, dict(job_id=self.job['job_id'], analysis_id=self.analysis['analysis_id']))
+
     def received(self, path, result, error):
         if self.worker is not None and self.worker.connection_generation != self.connection_generation:
             return
@@ -291,9 +317,19 @@ class Window(QMainWindow):
             return
         self.online = True
         if path != STATUS_PATH:
-            self.job = result
+            if path in (ANALYZE_PATH, ANALYSIS_STOP_PATH):
+                self.analysis = result
+                if path == ANALYZE_PATH:
+                    self.analysis_request_id = None
+                self.analysis_panel.show_status(self.analysis, self.job, self.analysis_supported)
+            else:
+                self.job = result
             if path == START_PATH:
                 self.pending_id = None
+                self.analysis = None
+                self.analysis_request_id = None
+                self.analysis_panel.show_status(None, self.job, self.analysis_supported)
+                self.tabs.setCurrentIndex(0)
             self.update_buttons()
             return
         self.apply_snapshot(result)
@@ -303,6 +339,12 @@ class Window(QMainWindow):
         self.mode = result['mode']
         self.badge.setText('MOCK · 模拟采集' if self.mode == 'mock' else 'MAXLAB · 真实采集')
         self.job = job = result.get('job')
+        self.analysis_supported = 'candidate_analysis_v1' in result.get('capabilities', [])
+        self.analysis = result.get('analysis')
+        self.analysis_panel.show_status(self.analysis, job, self.analysis_supported)
+        if self.analysis and self.analysis.get('analysis_id') and self.analysis['analysis_id'] != self.shown_analysis_id:
+            self.shown_analysis_id = self.analysis['analysis_id']
+            self.tabs.setCurrentIndex(1)
         if job is None:
             self.status.setText('服务已连接。'+('当前是模拟数据。' if self.mode == 'mock' else '已选择现场采集模式。'))
             return
@@ -342,6 +384,7 @@ class Window(QMainWindow):
                 event.ignore()
                 return
         self.timer.stop()
+        self.pending_command = None
         if self.worker:
             self.worker.wait(5000)
         event.accept()
@@ -363,6 +406,10 @@ QProgressBar {background:#20314a;border:none;} QProgressBar::chunk {background:#
 QTableWidget {background:#101d30;alternate-background-color:#15243a;gridline-color:#20324a;border:none;}
 QHeaderView::section {background:#21334b;color:#c8d9ed;padding:7px;border:none;}
 QScrollBar:vertical {background:#142137;width:10px;} QScrollBar::handle:vertical {background:#3c526c;}
+QTabWidget::pane {border:1px solid #273950;border-radius:6px;}
+QTabBar::tab {background:#18283e;padding:10px 24px;color:#91a8c3;}
+QTabBar::tab:selected {background:#20453f;color:#70e2d0;}
+QPlainTextEdit {background:#101d30;border:1px solid #273950;}
 '''
 
 
