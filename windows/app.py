@@ -16,6 +16,7 @@ from shared.protocol import (ACTIVE_STATES, DEFAULT_DURATION_S, DEFAULT_PORT,
 from .analysis_panel import AnalysisPanel
 from .connection import DEFAULT_HOST, connection_defaults
 from .local_analysis import LocalAnalysis
+from .future_panels import CalibrationPanel, GamePreviewPanel
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal, QRectF
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QPainter, QPen
@@ -201,6 +202,10 @@ class Window(QMainWindow):
         self.analysis_panel.cancel_requested.connect(self.stop_analysis)
         self.analysis_panel.file_requested.connect(self.select_existing_file)
         self.tabs.addTab(self.analysis_panel, '② 高出度候选')
+        self.calibration_panel = CalibrationPanel()
+        self.game_panel = GamePreviewPanel()
+        self.tabs.addTab(self.calibration_panel, '③ 刺激标定')
+        self.tabs.addTab(self.game_panel, '④ 石头剪刀布')
         layout.addWidget(self.tabs, 1)
         metrics = QHBoxLayout()
         self.time_label = QLabel('10:00')
@@ -358,8 +363,10 @@ class Window(QMainWindow):
             result = analysis.get('result') or {}
             job = dict(job_id=analysis['job_id'], mapping=result.get('mapping', []), mode='file')
             self.analysis_panel.show_status(analysis, job, True)
+            self.calibration_panel.show_analysis(analysis)
         else:
             self.analysis_panel.show_status(self.analysis, self.job, self.analysis_supported)
+            self.calibration_panel.show_analysis(self.analysis)
 
     def received(self, path, result, error):
         if self.worker is not None and self.worker.connection_generation != self.connection_generation:

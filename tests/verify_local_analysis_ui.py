@@ -71,6 +71,9 @@ def run():
             assert panel.table.rowCount() == result['candidate_count']
             assert len(panel.map.mapping) == len(result['mapping'])
             assert panel.progress.value() == 1000
+            assert window.tabs.count() == 4
+            assert window.calibration_panel.table.rowCount() == result['candidate_count']
+            assert all(not button.isEnabled() for button in window.calibration_panel.buttons+window.game_panel.buttons)
             checks += ['File button works without a Linux connection', 'Real worker progress reaches completion',
                 'Local result equals Linux worker result and parameters', 'Original H5 unchanged; coordinates rendered']
             window.apply_snapshot(dict(protocol=1, mode='mock', job=None,
@@ -81,6 +84,13 @@ def run():
             window.resize(1040, 730)
             app.processEvents()
             window.grab().save(str(output/'local_analysis_1040.png'))
+            window.tabs.setCurrentIndex(2)
+            app.processEvents()
+            window.grab().save(str(output/'calibration_preview_1040.png'))
+            window.tabs.setCurrentIndex(3)
+            app.processEvents()
+            window.grab().save(str(output/'game_preview_1040.png'))
+            window.tabs.setCurrentIndex(1)
             panel.table.selectRow(0)
             assert panel.map.selected == result['candidates'][0]['electrode']
             window.analyze_local_file(source)
