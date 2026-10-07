@@ -14,6 +14,7 @@ from shared.protocol import (ACTIVE_STATES, DEFAULT_DURATION_S, DEFAULT_PORT,
                              PROTOCOL_VERSION, START_PATH, STATUS_PATH, STOP_PATH,
                              ANALYZE_PATH, ANALYSIS_STOP_PATH, ANALYSIS_ACTIVE_STATES)
 from .analysis_panel import AnalysisPanel
+from .connection import DEFAULT_HOST, connection_defaults
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal, QRectF
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QPainter, QPen
@@ -136,7 +137,7 @@ def panel(title, widget):
 
 
 class Window(QMainWindow):
-    def __init__(self, host=f'127.0.0.1:{DEFAULT_PORT}', token=''):
+    def __init__(self, host=DEFAULT_HOST, token=''):
         super().__init__()
         self.setWindowTitle('Spontaneous Observer · 自发观测与候选分析')
         self.resize(1340, 860)
@@ -424,9 +425,10 @@ def configure_fonts(app):
 
 
 def main():
+    host, token = connection_defaults()
     parser = argparse.ArgumentParser()
-    parser.add_argument('--host', default=f'127.0.0.1:{DEFAULT_PORT}')
-    parser.add_argument('--token', default='')
+    parser.add_argument('--host', default=host)
+    parser.add_argument('--token', default=token)
     args = parser.parse_args()
     app = QApplication(sys.argv[:1])
     configure_fonts(app)
