@@ -4,7 +4,15 @@ Windows 操作端与 Linux Maxwell 采集端放在同一个仓库，使用统一
 
 当前已实现两个阶段：① 600 秒自发观测、实时图形与 H5 存档；② Linux 自动分析高出度候选，Windows 在同一窗口显示分析进度、候选表和电极空间位置。
 
-同一窗口还包含“③ 刺激标定”和“④ 石头剪刀布”预览页。第三页显示当前第二阶段的候选，刺激参数、最终三点映射及模型状态待配置；全部操作按钮保持灰色。第四页参考原 GestureLoop 的双方出拳、倒计时和 OK/点赞交互布局，操作按钮也暂未启用。预览页不会连接手套、刺激设备或加载历史模型，候选不会自动变成最终三个刺激点。
+同一窗口还包含“③ 刺激标定”和“④ 石头剪刀布”。第三页显示当前第二阶段的候选，刺激参数、最终三点映射及模型状态待配置；全部操作按钮保持灰色。第四页参考原独立 GestureLoop 程序，已接入真实 mHand 手套的连接和手势显示；实际刺激、模型加载和对局按钮暂未启用。候选不会自动变成最终三个刺激点。
+
+## 第四页：真实手套连接
+
+先启动原来的 mHand Studio，确认手套已连接并完成校准，开启数据广播。第四页填写与广播一致的 IP、UDP 端口和手别，再点“连接手套”。默认沿用旧程序的 `172.16.36.235:7000`、左手，可直接修改。手套 UDP 地址与 Linux 的 `172.16.14.73:8765` 是两个不同连接。
+
+新程序使用独立接收进程调用厂商 SDK，与旧程序具有相同的二进制结构、UDP 请求和手势编号映射（16 石头、2 剪刀、5 布、3 OK、14 点赞）。收到更新帧后才显示“已连接”；持续约 650 ms 确认稳定手势。3 秒未收到首帧或数据中断 2 秒时报告失败并清除手势。只显示手套输入，不触发 Maxwell 刺激。
+
+SDK DLL 不上传 GitHub。本机可把 `VDMocapSDK_DataRead.dll` 放在被 Git 忽略的 `sdk/mhand/`，或在页面点“选择 SDK”，或使用 `OBSERVER_GLOVE_SDK` 指定路径。连接参数保存到被忽略的 `windows/glove.local.json`。程序启动时不自动连接；关闭窗口会关闭接收进程。连接失败时核对广播设置、防火墙及 SDK；旧程序和本程序应分别测试，避免同时占用厂商 SDK 连接。
 
 **mock 软件链路和历史真实 H5 的候选分析已经过本地验证；真实 Maxwell 采集适配器尚未完成 Linux 现场验收。** 初始化、ActivityScan 和路由准备由现场 MaxLab 完成。当前没有刺激标定或猜拳操作。
 
@@ -100,7 +108,7 @@ git pull --ff-only
 
 ```bash
 python -m pip install -r linux/requirements.txt
-python -m unittest -v tests.test_service tests.test_analysis
+python -m unittest -v tests.test_service tests.test_analysis tests.test_glove
 ```
 
 Windows 需要 UI 测试时：
@@ -110,6 +118,7 @@ Windows 需要 UI 测试时：
 .\.venv\Scripts\python.exe -m tests.verify_ui
 .\.venv\Scripts\python.exe -m tests.verify_analysis_ui
 .\.venv\Scripts\python.exe -m tests.verify_local_analysis_ui
+.\.venv\Scripts\python.exe -m tests.verify_glove_ui
 ```
 
 图形测试在隔离的本地 mock 服务上运行，结果写入被 Git 忽略的 `artifacts/validation/`。CI 配置包含 Linux/Windows 服务测试、Windows 离屏 UI 联调和 Linux C++ mock 构建；云端执行结果以 Actions 为准。

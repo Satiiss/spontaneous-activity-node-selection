@@ -448,6 +448,7 @@ class Window(QMainWindow):
                 return
         self.timer.stop()
         self.local_analysis.close()
+        self.game_panel.glove.close()
         self.pending_command = None
         if self.worker:
             self.worker.wait(5000)
