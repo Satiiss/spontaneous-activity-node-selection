@@ -18,6 +18,8 @@ import numpy as np
 from .acquisition import MockSource, MaxlabSource
 from .analysis import AnalysisTask
 from .routing import RoutingFiles
+from .gestures import GestureLog
+from shared.gestures import GESTURE_PATH
 from shared.protocol import (ACTIVE_STATES, DEFAULT_DURATION_S, DEFAULT_PORT,
                              PROTOCOL_VERSION, START_PATH, STATUS_PATH, STOP_PATH,
                              ANALYZE_PATH, ANALYSIS_STOP_PATH, ANALYSIS_ACTIVE_STATES, ROUTING_PATH)
@@ -55,6 +57,7 @@ class Recorder:
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.mode, self.config = mode, dict(config or {})
+        self.gesture_log = GestureLog(self.root)
         self.config_path = Path(config_path).resolve() if config_path else None
         default_root = Path(self.config['routing_path']).resolve().parent if self.config.get('routing_path') else None
         self.routing_files = RoutingFiles(routing_root or self.config.get('routing_root') or default_root)
@@ -204,7 +207,7 @@ class Recorder:
     def snapshot(self):
         with self.lock:
             result = dict(protocol=PROTOCOL_VERSION, mode=self.mode, hardware_fault=self.hardware_fault, job=None,
-                          capabilities=['candidate_analysis_v1'],
+                          capabilities=['candidate_analysis_v1', 'gesture_events_v1'],
                           analysis=self.analysis.snapshot() if self.analysis else None)
             if self.mode == 'maxlab' and self.routing_files.root:
                 result['capabilities'].append('linux_routing_v1')
@@ -372,7 +375,9 @@ def make_server(recorder, host, port, token):
                     data = json.loads(self.rfile.read(size))
                     if not isinstance(data, dict):
                         raise ValueError('expected JSON object')
-                    if self.path == START_PATH:
+                    if self.path == GESTURE_PATH:
+                        result = recorder.gesture_log.receive(data)
+                    elif self.path == START_PATH:
                         result = recorder.start(data['request_id'], data.get('duration_s', DEFAULT_DURATION_S))
                     elif self.path == ROUTING_PATH:
                         result = recorder.select_routing(data['file'], data['sha256'], data.get('downloaded', False))

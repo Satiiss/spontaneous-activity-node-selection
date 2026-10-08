@@ -4,8 +4,9 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
     QGridLayout, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QProgressBar, QSplitter, QLineEdit, QSpinBox, QComboBox, QFileDialog)
+    QProgressBar, QSplitter, QLineEdit, QSpinBox, QComboBox, QFileDialog, QCheckBox)
 from .glove import GloveController, glove_settings
+from .gesture_sender import GestureSender
 
 
 def title(text):
@@ -66,8 +67,8 @@ class CalibrationPanel(QWidget):
         detail.addWidget(title('最终刺激点与手势映射'))
         self.mapping_table = readonly_table(['手势', '刺激电极', '验证状态'])
         self.mapping_table.setMinimumHeight(132)
-        self.mapping_table.setRowCount(3)
-        for i, gesture in enumerate(('石头', '剪刀', '布')):
+        self.mapping_table.setRowCount(5)
+        for i, gesture in enumerate(('石头', '剪刀', '布', 'OK', '点赞')):
             for j, value in enumerate((gesture, '未确定', '未标定')):
                 self.mapping_table.setItem(i, j, QTableWidgetItem(value))
         detail.addWidget(self.mapping_table, 1)
@@ -113,6 +114,8 @@ class GamePreviewPanel(QWidget):
         self.glove.connection_changed.connect(self.connection_changed)
         self.glove.gesture_changed.connect(self.gesture_changed)
         self.glove.frame_received.connect(self.frame_received)
+        self.sender = GestureSender(self)
+        self.glove.stable_received.connect(self.send_gesture)
         config = glove_settings()
         self.sdk_path = config['sdk']
         layout = QVBoxLayout(self)
@@ -150,6 +153,15 @@ class GamePreviewPanel(QWidget):
         layout.addLayout(connection)
         self.stream_info = QLabel('等待真实手套数据')
         layout.addWidget(self.stream_info)
+        self.send_checkbox = QCheckBox('将五种稳定手势发送到 Linux（接收并记录）')
+        self.send_checkbox.setEnabled(False)
+        self.send_checkbox.toggled.connect(self.transmission_changed)
+        layout.addWidget(self.send_checkbox)
+        self.delivery = QLabel('连接 Linux 服务后可启用手势传输 · MEA 刺激未接入')
+        self.delivery.setWordWrap(True)
+        layout.addWidget(self.delivery)
+        self.sender.status.connect(self.delivery.setText)
+        self.service_base = self.service_token = ''
         cards = QHBoxLayout()
         for caption, hint in (('你的出拳', '等待手套识别'), ('MEA 解码结果', '等待刺激响应解码')):
             box = QWidget()
@@ -171,7 +183,7 @@ class GamePreviewPanel(QWidget):
         countdown.setObjectName('metric')
         countdown.setAlignment(Qt.AlignCenter)
         layout.addWidget(countdown)
-        guide = QLabel('石头 · 剪刀 · 布    |    OK：开始 / 下一局    |    点赞：返回')
+        guide = QLabel('石头 · 剪刀 · 布 · OK · 点赞：均作为独立手势发送到 Linux')
         guide.setAlignment(Qt.AlignCenter)
         layout.addWidget(guide)
         controls = QHBoxLayout()
@@ -179,6 +191,25 @@ class GamePreviewPanel(QWidget):
         for button in self.buttons:
             controls.addWidget(button)
         layout.addLayout(controls)
+
+    def set_service(self, base, token, supported):
+        self.service_base, self.service_token = (base, token) if supported else ('', '')
+        self.send_checkbox.setEnabled(bool(self.service_base))
+        if not self.service_base:
+            self.send_checkbox.setChecked(False)
+        self.configure_sender()
+
+    def configure_sender(self):
+        enabled = self.send_checkbox.isChecked() and self.glove.connected
+        self.sender.configure(self.service_base if enabled else '', self.service_token if enabled else '')
+
+    def transmission_changed(self, checked):
+        self.configure_sender()
+        self.delivery.setText('传输已启用，请做新的稳定手势 · MEA 刺激未接入' if checked else '手势传输已关闭')
+
+    def send_gesture(self, frame):
+        if self.send_checkbox.isChecked() and self.glove.connected:
+            self.sender.send(frame)
 
     def settings(self):
         return dict(host=self.ip_input.text().strip(), port=self.port_input.value(),
@@ -214,6 +245,7 @@ class GamePreviewPanel(QWidget):
 
     def connection_changed(self, connected, message):
         self.connection.setText(message)
+        self.configure_sender()
         if not connected:
             self.stream_info.setText('等待真实手套数据')
         self.refresh_glove_buttons()

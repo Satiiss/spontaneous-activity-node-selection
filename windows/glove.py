@@ -9,7 +9,7 @@ import time
 from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, Signal
 
 ROOT = Path(__file__).resolve().parents[1]
-GESTURES = {16: '石头', 2: '剪刀', 5: '布', 3: 'OK', 14: '点赞'}
+from shared.gestures import GESTURES
 
 
 def glove_settings():
@@ -26,6 +26,7 @@ class GloveController(QObject):
     connection_changed = Signal(bool, str)
     gesture_changed = Signal(str, str)
     frame_received = Signal(object)
+    stable_received = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -38,6 +39,7 @@ class GloveController(QObject):
         self.stopping = False
         self.reported_failure = False
         self.last_message = '手套未连接'
+        self.hand = 'left'
 
     @property
     def active(self):
@@ -53,6 +55,7 @@ class GloveController(QObject):
             raise ValueError('请选择 mHand SDK DLL')
         if self.process:
             self.process.deleteLater()
+        self.hand = settings['hand']
         self.process = QProcess(self)
         self.buffer, self.stopping = b'', False
         self.reported_failure = False
@@ -84,7 +87,8 @@ class GloveController(QObject):
             self.gesture_changed.emit(name, '正在确认稳定手势')
         elif self.stable != name and now-self.candidate_since >= .65:
             self.stable = name
-            self.gesture_changed.emit(name, '手势已稳定 · 仅显示，不触发刺激')
+            self.gesture_changed.emit(name, '手势已稳定')
+            self.stable_received.emit(dict(event, hand=self.hand))
 
     def read(self):
         self.buffer += bytes(self.process.readAllStandardOutput())

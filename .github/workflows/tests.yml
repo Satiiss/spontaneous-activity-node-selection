@@ -12,7 +12,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -r linux/requirements.txt
-      - run: python -m unittest -v tests.test_service tests.test_analysis tests.test_glove tests.test_compare_recordings tests.test_routing
+      - run: python -m unittest -v tests.test_service tests.test_analysis tests.test_glove tests.test_compare_recordings tests.test_routing tests.test_gestures
       - run: python -m compileall -q windows linux shared tests
   windows-ui:
     runs-on: windows-latest
@@ -26,6 +26,7 @@ jobs:
       - run: python -m tests.verify_analysis_ui
       - run: python -m tests.verify_local_analysis_ui
       - run: python -m tests.verify_routing_ui
+      - run: python -m tests.verify_gesture_transport_ui
       - run: python -m tests.verify_glove_ui
   passive-reader:
     runs-on: ubuntu-latest

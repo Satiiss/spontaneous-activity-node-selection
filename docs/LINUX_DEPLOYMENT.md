@@ -67,3 +67,12 @@ failed/interrupted 后先确认官方 Saving 与读取进程已停止，保留�
 更新两端后，在第一阶段点击 Linux 路由按钮。Linux 服务默认只列出 hardware.json 中 routing_path 所在目录及其子目录；若需浏览所有日期的配置，启动服务时加 `--routing-root /home/maxwell/configs`。列表包含相对路径、通道数量和 SHA256，选择时重新检查文件；非法、超过 2 MB 或指向允许目录外的文件不接受。
 
 选择 CFG 会在采集输出目录的 routing-mappings 中生成对应映射，并保存到当前 --config 指定的采集配置文件，下一次录制使用新配置。没有自动调用 SDK 下载路由：必须在 MaxLab 中 Download 同一份 CFG，然后在对话框明确勾选已下载。未勾选会将 prepared_fixed_routing 设为 false 并禁用真实录制。采样率、well 和 filter 保持原配置，切换设备时仍须现场核验。录制或分析中不能切换；选择文件不会解除硬件故障锁定。界面支持旧 Linux 服务，旧服务不显示此入口。
+
+
+## 五种手套手势传输
+
+Windows 第四阶段支持石头（SDK ID 16）、剪刀（2）、布（5）、OK（3）、点赞（14）。连接新版 Linux 服务与真实手套后，勾选“将五种稳定手势发送到 Linux”，再做新的手势。稳定 650 ms 后发送一次；保持同一手势不会重复发送，松开到未识别状态或换手势后可再次发送。OK 和点赞也作为独立手势记录。
+
+认证接口 `POST /v1/gesture` 接收 `event_id`、`gesture_id`、`frame_index`、`hand`。Linux 回执含 `received`、`received_at`、`stimulated: false`。记录保存在启动时 `--output` 目录的 `gesture-events.sqlite3`，表 `events` 的 `receipt` 列存放 JSON；相同 event_id 的相同消息重发只返回原回执，重启后仍去重。该时间为 Linux 接收时间，并非 MEA 采样帧时间，手套 frame_index 也不是 MEA 帧号。
+
+本功能只传输并保存手势，不调用 Maxwell 刺激。真实刺激需另行配置五种手势的电极、波形参数及现场授权。Windows 显示 Linux 接收回执，不能把收到手势解释为已刺激。传输失败或断线不自动重发；重新连接后需再次勾选并做新手势。服务必须更新并重启；旧版服务自动禁用此选项。不需要重新编译 mea_reader。

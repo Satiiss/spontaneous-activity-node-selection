@@ -299,6 +299,9 @@ class Window(QMainWindow):
             self.routing_button.setToolTip(self.routing.get('path', ''))
         self.stop_button.setEnabled(bool(self.online and active and not busy))
         self.connect_button.setEnabled(not busy)
+        base = 'http://'+self.host.text().strip().removeprefix('http://').rstrip('/')
+        self.game_panel.set_service(base if self.connected and self.online else '', self.token.text(),
+                                    getattr(self, 'gesture_supported', False))
         self.host.setEnabled(not self.connected)
         self.token.setEnabled(not self.connected)
         self.connect_button.setText('断开界面连接' if self.connected else '连接服务')
@@ -449,6 +452,7 @@ class Window(QMainWindow):
 
     def apply_snapshot(self, result):
         self.mode = result['mode']
+        self.gesture_supported = 'gesture_events_v1' in result.get('capabilities', [])
         self.routing_supported = 'linux_routing_v1' in result.get('capabilities', [])
         self.routing = result.get('routing')
         self.hardware_fault = bool(result.get('hardware_fault'))
@@ -500,6 +504,7 @@ class Window(QMainWindow):
                 return
         self.timer.stop()
         self.local_analysis.close()
+        self.game_panel.sender.configure('', '')
         self.game_panel.glove.close()
         self.pending_command = None
         if self.worker:
