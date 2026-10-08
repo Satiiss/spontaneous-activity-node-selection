@@ -113,7 +113,7 @@ int main(int argc, char** argv) {
 #ifdef WITH_MAXLAB
             maxlab::checkVersions();
             auto status = maxlab::DataStreamerFiltered_open(filter == "iir" ? maxlab::FilterType::IIR : maxlab::FilterType::FIR);
-            if (status != maxlab::MAXLAB_OK) throw std::runtime_error(maxlab::statusToText(status));
+            if (status != maxlab::MAXLAB_OK) throw std::runtime_error("SDK stream operation failed; status=" + std::to_string(static_cast<int>(status)));
             opened = true;
 #else
             throw std::runtime_error("rebuild with WITH_MAXLAB=ON for hardware input");
@@ -147,7 +147,7 @@ int main(int argc, char** argv) {
                     if (Clock::now() - last_frame > std::chrono::seconds(2)) throw std::runtime_error("stream timeout");
                     continue;
                 }
-                if (status != maxlab::MAXLAB_OK) throw std::runtime_error(maxlab::statusToText(status));
+                if (status != maxlab::MAXLAB_OK) throw std::runtime_error("SDK stream operation failed; status=" + std::to_string(static_cast<int>(status)));
                 if (data.frameInfo.well_id != well) {
                     if (Clock::now() - last_frame > std::chrono::seconds(2)) throw std::runtime_error("target well timeout");
                     continue;
@@ -195,7 +195,7 @@ int main(int argc, char** argv) {
     if (opened) {
         auto status = maxlab::DataStreamerFiltered_close();
         if (status != maxlab::MAXLAB_OK) {
-            std::cerr << "stream close failed; check mxwserver before reuse: " << maxlab::statusToText(status) << '\n';
+            std::cerr << "stream close failed; check mxwserver before reuse: " << "SDK status=" << static_cast<int>(status) << '\n';
             result = 1;
         }
     }
