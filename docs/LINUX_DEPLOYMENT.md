@@ -57,3 +57,7 @@ PYTHONPATH 指向包含 maxlab Python 包的父目录。用 hostname -I 核对�
 failed/interrupted 后先确认官方 Saving 与读取进程已停止，保留故障证据，用新的 output 目录重启。不要并行运行两个服务操作同一设备。
 
 真实流中未映射到 CFG 电极的通道事件保存在 spikes.h5 的 data_store/data0000/unmapped_spikes，保留原始帧号、通道和幅度；不计入实时放电率、累计有效 Spike 或候选分析。session.json 的 unmapped_spikes 与 unmapped_channels 保存数量。录制完成前仍核验官方 H5 的设备映射与 CFG 完全一致，映射不一致继续报告失败并锁定。
+
+## 官方文件与实时流对比
+
+在录制完成、文件关闭后执行 `python -m linux.compare_recordings --session /absolute/path/to/session-directory`。工具只读取官方 native H5 和 spikes.h5，不加载原始电压数组，不连接 SDK；在任务目录保存 quality-comparison.json。比较使用实时流的绝对采集帧窗口，打印通道数量差、同通道最近事件时间差及官方原始数据的形状和帧元信息。最近事件匹配不是一对一匹配，不能作为放电检测准确率；两份事件一致仍需抽查原始波形，元信息本身也不保证原始文件无缺帧。

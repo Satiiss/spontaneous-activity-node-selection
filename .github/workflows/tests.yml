@@ -12,7 +12,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -r linux/requirements.txt
-      - run: python -m unittest -v tests.test_service tests.test_analysis tests.test_glove
+      - run: python -m unittest -v tests.test_service tests.test_analysis tests.test_glove tests.test_compare_recordings
       - run: python -m compileall -q windows linux shared tests
   windows-ui:
     runs-on: windows-latest
