@@ -12,10 +12,11 @@ import uuid
 
 from shared.protocol import (ACTIVE_STATES, DEFAULT_DURATION_S, DEFAULT_PORT,
                              PROTOCOL_VERSION, START_PATH, STATUS_PATH, STOP_PATH,
-                             ANALYZE_PATH, ANALYSIS_STOP_PATH, ANALYSIS_ACTIVE_STATES)
+                             ANALYZE_PATH, ANALYSIS_STOP_PATH, ANALYSIS_ACTIVE_STATES, ROUTING_PATH)
 from .analysis_panel import AnalysisPanel
 from .connection import DEFAULT_HOST, connection_defaults
 from .local_analysis import LocalAnalysis
+from .routing_dialog import RoutingDialog
 from .future_panels import CalibrationPanel, GamePreviewPanel
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal, QRectF
@@ -152,6 +153,10 @@ class Window(QMainWindow):
         self.online = False
         self.pending_id = None
         self.mode = None
+        self.routing = None
+        self.routing_supported = False
+        self.routing_dialog = None
+        self.hardware_fault = False
         self.analysis = None
         self.analysis_supported = False
         self.analysis_request_id = None
@@ -196,6 +201,12 @@ class Window(QMainWindow):
         self.tabs = QTabWidget()
         observation = QWidget()
         observation_layout = QVBoxLayout(observation)
+        route_bar = QHBoxLayout()
+        self.routing_button = QPushButton('选择 Linux 路由')
+        self.routing_button.clicked.connect(self.select_linux_routing)
+        route_bar.addWidget(self.routing_button)
+        route_bar.addStretch()
+        observation_layout.addLayout(route_bar)
         self.tabs.addTab(observation, '① 自发观测')
         self.analysis_panel = AnalysisPanel()
         self.analysis_panel.start_requested.connect(self.start_analysis)
@@ -276,7 +287,16 @@ class Window(QMainWindow):
                 or (self.worker is not None and self.worker.path != STATUS_PATH))
         active = self.job and self.job['state'] in ACTIVE
         analysis_active = self.analysis and self.analysis['state'] in ANALYSIS_ACTIVE_STATES
-        self.start_button.setEnabled(self.online and not active and not analysis_active and not busy and not self.local_analysis.active)
+        self.start_button.setEnabled(self.online and not active and not analysis_active and not busy and not self.local_analysis.active
+                                     and not self.hardware_fault and (self.routing is None or self.routing.get("prepared", False)))
+        self.routing_button.setVisible(self.routing_supported)
+        self.routing_button.setEnabled(bool(self.online and self.routing_supported and not active
+                                           and not analysis_active and not busy and not self.hardware_fault))
+        if self.routing:
+            name = self.routing.get('path', '').rsplit('/', 1)[-1]
+            ready = '已确认' if self.routing.get('prepared') else '待确认下载'
+            self.routing_button.setText(f'Linux 路由：{name} · {ready}')
+            self.routing_button.setToolTip(self.routing.get('path', ''))
         self.stop_button.setEnabled(bool(self.online and active and not busy))
         self.connect_button.setEnabled(not busy)
         self.host.setEnabled(not self.connected)
@@ -304,6 +324,23 @@ class Window(QMainWindow):
     def poll(self):
         if self.connected:
             self.send(STATUS_PATH)
+
+    def select_linux_routing(self):
+        self.send(ROUTING_PATH)
+
+    def show_routing_dialog(self, catalog):
+        if self.routing_dialog is not None:
+            self.routing_dialog.close()
+        dialog = RoutingDialog(catalog, self)
+        self.routing_dialog = dialog
+        dialog.accepted.connect(lambda: self.send(ROUTING_PATH, dialog.selection()))
+        dialog.finished.connect(lambda: self.routing_dialog_closed(dialog))
+        dialog.show()
+
+    def routing_dialog_closed(self, dialog):
+        if self.routing_dialog is dialog:
+            self.routing_dialog = None
+        dialog.deleteLater()
 
     def start_recording(self):
         self.pending_id = self.pending_id or uuid.uuid4().hex
@@ -371,6 +408,10 @@ class Window(QMainWindow):
     def received(self, path, result, error):
         if self.worker is not None and self.worker.connection_generation != self.connection_generation:
             return
+        if error and path == ROUTING_PATH:
+            QMessageBox.warning(self, 'Linux 路由选择失败', error)
+            self.update_buttons()
+            return
         if error:
             self.online = False
             self.badge.setText('连接或请求异常')
@@ -378,6 +419,14 @@ class Window(QMainWindow):
             self.update_buttons()
             return
         self.online = True
+        if path == ROUTING_PATH:
+            if 'files' in result:
+                self.show_routing_dialog(result)
+            else:
+                self.pending_id = None
+                self.apply_snapshot(result)
+            self.update_buttons()
+            return
         if path != STATUS_PATH:
             if path in (ANALYZE_PATH, ANALYSIS_STOP_PATH):
                 self.analysis = result
@@ -400,6 +449,9 @@ class Window(QMainWindow):
 
     def apply_snapshot(self, result):
         self.mode = result['mode']
+        self.routing_supported = 'linux_routing_v1' in result.get('capabilities', [])
+        self.routing = result.get('routing')
+        self.hardware_fault = bool(result.get('hardware_fault'))
         self.badge.setText('MOCK · 模拟采集' if self.mode == 'mock' else 'MAXLAB · 真实采集')
         self.job = job = result.get('job')
         self.analysis_supported = 'candidate_analysis_v1' in result.get('capabilities', [])

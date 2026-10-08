@@ -61,3 +61,9 @@ failed/interrupted 后先确认官方 Saving 与读取进程已停止，保留�
 ## 官方文件与实时流对比
 
 在录制完成、文件关闭后执行 `python -m linux.compare_recordings --session /absolute/path/to/session-directory`。工具只读取官方 native H5 和 spikes.h5，不加载原始电压数组，不连接 SDK；在任务目录保存 quality-comparison.json。比较使用实时流的绝对采集帧窗口，打印通道数量差、同通道最近事件时间差及官方原始数据的形状和帧元信息。最近事件匹配不是一对一匹配，不能作为放电检测准确率；两份事件一致仍需抽查原始波形，元信息本身也不保证原始文件无缺帧。
+
+## Windows 选择 Linux CFG
+
+更新两端后，在第一阶段点击 Linux 路由按钮。Linux 服务默认只列出 hardware.json 中 routing_path 所在目录及其子目录；若需浏览所有日期的配置，启动服务时加 `--routing-root /home/maxwell/configs`。列表包含相对路径、通道数量和 SHA256，选择时重新检查文件；非法、超过 2 MB 或指向允许目录外的文件不接受。
+
+选择 CFG 会在采集输出目录的 routing-mappings 中生成对应映射，并保存到当前 --config 指定的采集配置文件，下一次录制使用新配置。没有自动调用 SDK 下载路由：必须在 MaxLab 中 Download 同一份 CFG，然后在对话框明确勾选已下载。未勾选会将 prepared_fixed_routing 设为 false 并禁用真实录制。采样率、well 和 filter 保持原配置，切换设备时仍须现场核验。录制或分析中不能切换；选择文件不会解除硬件故障锁定。界面支持旧 Linux 服务，旧服务不显示此入口。

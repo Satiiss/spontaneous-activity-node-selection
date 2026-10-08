@@ -10,3 +10,5 @@ STOP_PATH = '/v1/stop'
 ANALYZE_PATH = '/v1/analyze'
 ANALYSIS_STOP_PATH = '/v1/analysis/stop'
 ANALYSIS_ACTIVE_STATES = frozenset({'queued', 'running', 'cancelling'})
+
+ROUTING_PATH = "/v1/routing"

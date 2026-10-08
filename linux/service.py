@@ -17,9 +17,10 @@ import h5py
 import numpy as np
 from .acquisition import MockSource, MaxlabSource
 from .analysis import AnalysisTask
+from .routing import RoutingFiles
 from shared.protocol import (ACTIVE_STATES, DEFAULT_DURATION_S, DEFAULT_PORT,
                              PROTOCOL_VERSION, START_PATH, STATUS_PATH, STOP_PATH,
-                             ANALYZE_PATH, ANALYSIS_STOP_PATH, ANALYSIS_ACTIVE_STATES)
+                             ANALYZE_PATH, ANALYSIS_STOP_PATH, ANALYSIS_ACTIVE_STATES, ROUTING_PATH)
 
 ACTIVE = ACTIVE_STATES
 SPIKE_DTYPE = np.dtype([('frameno', '<i8'), ('channel', '<i4'), ('amplitude', '<f4')])
@@ -49,10 +50,14 @@ def verify_native(paths, mapping, rate, well):
 
 
 class Recorder:
-    def __init__(self, root, mode='mock', config=None, auto_analyze=True, analysis_config=None):
+    def __init__(self, root, mode='mock', config=None, auto_analyze=True, analysis_config=None,
+                 routing_root=None, config_path=None):
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
-        self.mode, self.config = mode, config or {}
+        self.mode, self.config = mode, dict(config or {})
+        self.config_path = Path(config_path).resolve() if config_path else None
+        default_root = Path(self.config['routing_path']).resolve().parent if self.config.get('routing_path') else None
+        self.routing_files = RoutingFiles(routing_root or self.config.get('routing_root') or default_root)
         self.lock = threading.RLock()
         self.stop_event = threading.Event()
         self.job, self.thread = None, None
@@ -80,6 +85,39 @@ class Recorder:
     def _persist(self):
         write_json(Path(self.job['directory'])/'session.json', self.job)
 
+    def routing_status(self):
+        return dict(path=self.config.get('routing_path', ''),
+                    prepared=self.config.get('prepared_fixed_routing') is True,
+                    sha256=self.config.get('routing_sha256'),
+                    root=str(self.routing_files.root) if self.routing_files.root else '')
+
+    def list_routing(self):
+        if self.mode != 'maxlab':
+            raise ValueError('只有真实采集模式支持选择 Linux 路由')
+        with self.lock:
+            return dict(**self.routing_files.listing(), selected=self.routing_status())
+
+    def select_routing(self, name, digest, downloaded=False):
+        if self.mode != 'maxlab' or type(downloaded) is not bool or not isinstance(digest, str):
+            raise ValueError('真实路由选择参数无效')
+        with self.lock:
+            if self.hardware_fault:
+                raise ValueError('硬件故障锁定，选择 CFG 不会解除故障')
+            if ((self.job and self.job['state'] in ACTIVE) or
+                    (self.analysis and self.analysis.snapshot()['state'] in ANALYSIS_ACTIVE_STATES)):
+                raise ValueError('录制或分析正在运行，不能切换路由')
+            path, rows, digest = self.routing_files.load(name, digest)
+            output = self.root/'routing-mappings'/f'{digest}.json'
+            output.parent.mkdir(exist_ok=True)
+            write_json(output, rows)
+            config = dict(self.config, routing_path=str(path), mapping_path=str(output),
+                          routing_sha256=digest, routing_root=str(self.routing_files.root),
+                          prepared_fixed_routing=downloaded)
+            if self.config_path:
+                write_json(self.config_path, config)
+            self.config = config
+            return self.snapshot()
+
     def start(self, request_id, duration=DEFAULT_DURATION_S):
         if not isinstance(request_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{8,80}', request_id):
             raise ValueError('invalid request_id')
@@ -102,6 +140,10 @@ class Recorder:
             estimate = int(duration*self.config.get('sample_rate', 20000)*1024*2*1.3) if self.mode == 'maxlab' else 128*1024**2
             if shutil.disk_usage(self.root).free < estimate + 256*1024**2:
                 raise ValueError('录制目录剩余空间不足')
+            if self.mode == 'maxlab' and self.config.get('routing_sha256'):
+                digest = hashlib.sha256(Path(self.config['routing_path']).read_bytes()).hexdigest()
+                if digest != self.config['routing_sha256']:
+                    raise ValueError('已选择的 CFG 文件改变，请重新选择并确认设备路由')
             source = MaxlabSource(self.config) if self.mode == 'maxlab' else MockSource()
             jid = time.strftime('%Y%m%d_%H%M%S')+'_'+uuid.uuid4().hex[:8]
             directory = self.root/jid
@@ -164,6 +206,9 @@ class Recorder:
             result = dict(protocol=PROTOCOL_VERSION, mode=self.mode, hardware_fault=self.hardware_fault, job=None,
                           capabilities=['candidate_analysis_v1'],
                           analysis=self.analysis.snapshot() if self.analysis else None)
+            if self.mode == 'maxlab' and self.routing_files.root:
+                result['capabilities'].append('linux_routing_v1')
+                result['routing'] = self.routing_status()
             if not self.job:
                 return result
             job = dict(self.job)
@@ -329,6 +374,8 @@ def make_server(recorder, host, port, token):
                         raise ValueError('expected JSON object')
                     if self.path == START_PATH:
                         result = recorder.start(data['request_id'], data.get('duration_s', DEFAULT_DURATION_S))
+                    elif self.path == ROUTING_PATH:
+                        result = recorder.select_routing(data['file'], data['sha256'], data.get('downloaded', False))
                     elif self.path == STOP_PATH:
                         result = recorder.stop(data['job_id'])
                     elif self.path == ANALYZE_PATH:
@@ -337,6 +384,8 @@ def make_server(recorder, host, port, token):
                         result = recorder.cancel_analysis(data['job_id'], data['analysis_id'])
                     else:
                         return self.reply(404, {'error': 'unknown command'})
+                elif self.path == ROUTING_PATH:
+                    result = recorder.list_routing()
                 elif self.path == STATUS_PATH:
                     result = recorder.snapshot()
                 else:
@@ -368,6 +417,7 @@ def main():
     parser.add_argument('--output', default=str(Path(__file__).resolve().parents[1]/'data'/'recordings'))
     parser.add_argument('--token', required=True)
     parser.add_argument('--config')
+    parser.add_argument('--routing-root', help='允许 Windows 选择 CFG 的 Linux 目录；默认当前 CFG 所在目录')
     parser.add_argument('--analysis-config', default=str(Path(__file__).parent/'analysis.yaml'))
     parser.add_argument('--no-auto-analysis', action='store_true')
     args = parser.parse_args()
@@ -377,7 +427,7 @@ def main():
         parser.error('--mode maxlab requires --config')
     config = json.loads(Path(args.config).read_text('utf-8')) if args.config else {}
     recorder = Recorder(args.output, args.mode, config, auto_analyze=not args.no_auto_analysis,
-                        analysis_config=args.analysis_config)
+                        analysis_config=args.analysis_config, routing_root=args.routing_root, config_path=args.config)
     server = make_server(recorder, args.host, args.port, args.token)
     print(f'Observer {args.mode}: http://{args.host}:{server.server_port} ; {recorder.root}', flush=True)
     try:
