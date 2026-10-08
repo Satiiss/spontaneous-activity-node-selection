@@ -63,12 +63,23 @@ def analyze_file(path, output, config, mode, well=0, expected_mapping=None, expe
         expected = {row['channel']: row['electrode'] for row in expected_mapping}
         if actual != expected:
             raise ValueError('分析文件映射与录制会话不一致')
-    if not set(session.channel).issubset(session.channel_to_electrode):
-        raise ValueError('Spike 通道缺少真实电极映射')
     if not np.isfinite(session.amplitude).all() or (session.frameno < 0).any():
         raise ValueError('invalid spike data')
+    excluded_unmapped_spikes = 0
+    if mode == 'maxlab' and expected_mapping is not None:
+        if (session.channel < 0).any() or (session.channel >= 1024).any():
+            raise ValueError('invalid spike channel')
+        # Native mapping was checked above. Unrouted readout events stay in the
+        # original H5, and cannot contribute to the mapped-electrode network.
+        selected = np.isin(session.channel, list(expected))
+        excluded_unmapped_spikes = int(np.count_nonzero(~selected))
+        for field in ('frameno', 'channel', 'amplitude', 'time_sec'):
+            setattr(session, field, getattr(session, field)[selected])
+    if not set(session.channel).issubset(session.channel_to_electrode):
+        raise ValueError('Spike 通道缺少真实电极映射')
     emit('reading', .10, 'Spike 读取完成', spike_count=len(session.channel),
-         active_channels=len(np.unique(session.channel)), mapping_count=len(session.channel_to_electrode))
+         active_channels=len(np.unique(session.channel)), mapping_count=len(session.channel_to_electrode),
+         excluded_unmapped_spikes=excluded_unmapped_spikes)
     # The original core requires at least one active channel. Silence is a valid empty result.
     if len(session.channel):
         result = analyze_spontaneous_network(session, config, progress=emit)
@@ -89,6 +100,7 @@ def analyze_file(path, output, config, mode, well=0, expected_mapping=None, expe
               for name in ('core.py', 'burst.py', 'io.py')}
     summary = dict(schema='spontaneous-candidates-v1', mode=mode, source_h5=str(path),
         algorithm='spont_burst_outdegree', config=config, algorithm_sha256=hashes,
+        excluded_unmapped_spikes=excluded_unmapped_spikes,
         spike_count=len(session.channel), active_channels=len(np.unique(session.channel)),
         mapping_count=len(session.channel_to_electrode), burst_count=len(result['bursts']),
         edge_count=len(result['edges']), candidate_count=len(candidates), threshold=threshold,

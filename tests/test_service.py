@@ -11,7 +11,7 @@ import urllib.error
 import h5py
 import numpy as np
 from linux.acquisition import MaxlabSource, validate_mapping
-from linux.service import Recorder, make_server
+from linux.service import Recorder, make_server, MAP_DTYPE
 
 
 class RecordingTests(unittest.TestCase):
@@ -150,6 +150,78 @@ class RecordingTests(unittest.TestCase):
             MaxlabSource({})
         with self.assertRaises(ValueError):
             validate_mapping([dict(channel=0, electrode=1, x=0, y=0)]*2)
+
+
+class UnmappedHardwareTests(unittest.TestCase):
+    def run_recording(self, root, native_matches=True, invalid_channel=False):
+        clock = [100.]
+        class Source:
+            rate = 20
+            well = 0
+            mapping = [dict(channel=0, electrode=10, x=0., y=0.)]
+            def __init__(self, config):
+                pass
+            def start(self, directory):
+                self.directory = directory
+                self.started = clock[0]
+            def read(self, stop):
+                first = round((clock[0]-self.started)*20)
+                clock[0] += 1
+                return dict(first=first, last=first+19,
+                            spikes=[[first, 0, -42.], [first+19, -1 if invalid_channel else 355, -9.]])
+            def close(self):
+                path = self.directory/'native.raw.h5'
+                with h5py.File(path, 'w') as f:
+                    g = f.create_group('data_store/data0000')
+                    g.create_dataset('settings/sampling', data=[self.rate])
+                    electrode = 10 if native_matches else 11
+                    g.create_dataset('settings/mapping', data=np.array([(0, electrode, 0., 0.)], dtype=MAP_DTYPE))
+                    g.create_dataset('spikes', data=[])
+                return [path]
+        route = Path(root)/'route.cfg'
+        route.write_text('test routing snapshot')
+        rec = Recorder(Path(root)/'recordings', 'maxlab',
+                       dict(routing_path=str(route), sample_rate=20), auto_analyze=False)
+        with patch('linux.service.MaxlabSource', Source), patch('linux.service.time.monotonic', lambda: clock[0]):
+            rec.start('unmapped-test', 600)
+            rec.thread.join(8)
+        self.assertFalse(rec.thread.is_alive())
+        return rec, rec.snapshot()['job']
+
+    def test_unmapped_events_preserved_without_affecting_rates_or_analysis(self):
+        with tempfile.TemporaryDirectory() as root:
+            rec, job = self.run_recording(root)
+            self.assertEqual(job['state'], 'completed', job['error'])
+            self.assertFalse(rec.hardware_fault)
+            self.assertEqual(job['total_spikes'], 600)
+            self.assertEqual(job['unmapped_spikes'], 600)
+            self.assertEqual(job['unmapped_channels'], {'355': 600})
+            self.assertEqual(len(job['rates']), 1)
+            self.assertTrue(all(c == 0 for _, c, _ in rec.events))
+            with h5py.File(Path(job['directory'])/'spikes.h5') as f:
+                g = f['data_store/data0000']
+                self.assertTrue(f.attrs['complete'])
+                self.assertEqual(list(g['spikes']['channel']), [0]*600)
+                self.assertEqual(list(g['unmapped_spikes']['channel']), [355]*600)
+                self.assertEqual(list(g['unmapped_spikes']['frameno']), list(range(19, 12000, 20)))
+                self.assertTrue(g['unmapped_spikes'].attrs['excluded_from_analysis'])
+
+    def test_device_mapping_mismatch_still_fails_and_locks(self):
+        with tempfile.TemporaryDirectory() as root:
+            rec, job = self.run_recording(root, native_matches=False)
+            self.assertEqual(job['state'], 'failed')
+            self.assertTrue(rec.hardware_fault)
+            self.assertIn('native mapping differs', job['error'])
+            with h5py.File(Path(job['directory'])/'spikes.partial.h5') as f:
+                self.assertFalse(f.attrs['complete'])
+                self.assertEqual(len(f['data_store/data0000/unmapped_spikes']), 600)
+
+    def test_invalid_channel_is_not_quarantined_as_unmapped(self):
+        with tempfile.TemporaryDirectory() as root:
+            rec, job = self.run_recording(root, invalid_channel=True)
+            self.assertEqual(job['state'], 'failed')
+            self.assertTrue(rec.hardware_fault)
+            self.assertIn('通道编号无效', job['error'])
 
 
 class HttpTests(unittest.TestCase):

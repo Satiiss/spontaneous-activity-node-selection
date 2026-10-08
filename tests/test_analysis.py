@@ -10,6 +10,7 @@ from unittest.mock import patch
 import urllib.request
 import urllib.error
 
+import numpy as np
 import h5py
 
 from linux.analysis import AnalysisTask
@@ -77,6 +78,28 @@ class AnalysisTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(ValueError):
                 analyze_file(job['files'][0], Path(directory)/'out', load_config(CONFIG), 'mock')
             self.assertFalse((Path(directory)/'out'/'result.json').exists())
+
+    def test_native_unmapped_events_excluded_only_with_confirmed_mapping(self):
+        with tempfile.TemporaryDirectory() as directory:
+            job = write_recording(directory, layout='wells', silent=True)
+            path = Path(job['files'][0])
+            with h5py.File(path, 'r+') as f:
+                g = f['wells/well000/rec0000']
+                dtype = g['spikes'].dtype
+                del g['spikes']
+                g.create_dataset('spikes', data=np.array([(12345, 355, -9.)], dtype=dtype))
+            with contextlib.redirect_stdout(io.StringIO()):
+                result = analyze_file(path, Path(directory)/'verified', load_config(CONFIG), 'maxlab',
+                                      expected_mapping=job['mapping'], expected_rate=20000)
+            self.assertEqual(result['excluded_unmapped_spikes'], 1)
+            self.assertEqual(result['spike_count'], 0)
+            self.assertEqual(result['candidate_count'], 0)
+            with h5py.File(path) as f:
+                self.assertEqual(len(f['wells/well000/rec0000/spikes']), 1)
+            for mode, expected in [('file', None), ('maxlab', None), ('maxlab', [])]:
+                with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(ValueError):
+                    analyze_file(path, Path(directory)/'rejected', load_config(CONFIG), mode,
+                                 expected_mapping=expected)
 
     def test_failed_analysis_preserves_recording_and_can_retry(self):
         with tempfile.TemporaryDirectory() as directory:

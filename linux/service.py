@@ -108,6 +108,7 @@ class Recorder:
             directory.mkdir()
             self.job = dict(job_id=jid, request_id=request_id, mode=self.mode, state='starting',
                 duration_s=duration, elapsed_s=0., acquired_s=0., total_spikes=0, error='',
+                unmapped_spikes=0, unmapped_channels={},
                 directory=str(directory), files=[], mapping=source.mapping, sample_rate=source.rate,
                 created_at=time.strftime('%Y-%m-%dT%H:%M:%S%z'), window_s=0., first_frame=None,
                 well=self.config.get('well', 0))
@@ -200,6 +201,10 @@ class Recorder:
             group.create_dataset('settings/sampling', data=[source.rate])
             group.create_dataset('settings/mapping', data=np.array([tuple(r[k] for k in MAP_DTYPE.names) for r in source.mapping], dtype=MAP_DTYPE))
             ds = group.create_dataset('spikes', shape=(0,), maxshape=(None,), dtype=SPIKE_DTYPE, chunks=True)
+            unmapped = group.create_dataset('unmapped_spikes', shape=(0,), maxshape=(None,),
+                                             dtype=SPIKE_DTYPE, chunks=True)
+            unmapped.attrs.update(excluded_from_analysis=True,
+                                  reason='channel absent from confirmed electrode mapping')
             source.start(directory)
             started = source.started
             with self.lock:
@@ -215,16 +220,34 @@ class Recorder:
                 if first is None:
                     first = batch['first']
                 previous = batch['last']
-                if any(s[1] not in channels for s in batch['spikes']):
-                    raise RuntimeError('Spike 通道不在确认的路由中')
-                rows = np.array([tuple(s) for s in batch['spikes']], dtype=SPIKE_DTYPE)
+                selected, excluded = [], []
+                for spike in batch['spikes']:
+                    if type(spike[1]) is not int or not 0 <= spike[1] < 1024:
+                        raise RuntimeError('Spike 通道编号无效')
+                    (selected if spike[1] in channels else excluded).append(spike)
+                if excluded:
+                    if self.mode != 'maxlab':
+                        raise RuntimeError('Spike 通道不在确认的路由中')
+                    # SDK stream covers all readout channels, including unrouted ones.
+                    # Keep their original events for diagnostics; native mapping must
+                    # still match the confirmed CFG before recording can complete.
+                    n = len(unmapped)
+                    unmapped.resize((n+len(excluded),))
+                    unmapped[n:] = np.array([tuple(s) for s in excluded], dtype=SPIKE_DTYPE)
+                    with self.lock:
+                        self.job['unmapped_spikes'] += len(excluded)
+                        counts = self.job['unmapped_channels']
+                        for _, channel, _ in excluded:
+                            key = str(channel)
+                            counts[key] = counts.get(key, 0) + 1
+                rows = np.array([tuple(s) for s in selected], dtype=SPIKE_DTYPE)
                 if len(rows):
                     n = len(ds)
                     ds.resize((n+len(rows),))
                     ds[n:] = rows
                 covered = (batch['last']-first+1)/source.rate
                 with self.lock:
-                    self.events.extend(((f-first)/source.rate, c, a) for f, c, a in sorted(batch['spikes']))
+                    self.events.extend(((f-first)/source.rate, c, a) for f, c, a in sorted(selected))
                     # Source may order simultaneous spikes arbitrarily; normalize each batch.
                     while self.events and self.events[0][0] < covered-5:
                         self.events.popleft()

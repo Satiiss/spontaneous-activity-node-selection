@@ -55,3 +55,5 @@ PYTHONPATH 指向包含 maxlab Python 包的父目录。用 hostname -I 核对�
 提前停止需等待 stopped，不能视作完整十分钟。关闭 Windows 不会停止录制。服务端 Ctrl+C 会请求停止并等待收尾；强制终止或断电无法保证设备端录制停止。
 
 failed/interrupted 后先确认官方 Saving 与读取进程已停止，保留故障证据，用新的 output 目录重启。不要并行运行两个服务操作同一设备。
+
+真实流中未映射到 CFG 电极的通道事件保存在 spikes.h5 的 data_store/data0000/unmapped_spikes，保留原始帧号、通道和幅度；不计入实时放电率、累计有效 Spike 或候选分析。session.json 的 unmapped_spikes 与 unmapped_channels 保存数量。录制完成前仍核验官方 H5 的设备映射与 CFG 完全一致，映射不一致继续报告失败并锁定。
