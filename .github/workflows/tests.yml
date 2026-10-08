@@ -30,6 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: python3 -m unittest -v tests.test_reader_sdk
       - run: cmake -S linux/reader -B linux/reader/build
       - run: cmake --build linux/reader/build -j2
       - run: python3 -m linux.reader_protocol --reader ./linux/reader/build/mea_reader --mode mock --frames 20000

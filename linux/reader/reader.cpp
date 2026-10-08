@@ -7,6 +7,7 @@
 #include <fstream>
 #include <map>
 #include <vector>
+#include <utility>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -137,11 +138,26 @@ int main(int argc, char** argv) {
             if (spike_count++) spikes << ',';
             spikes << '[' << frame << ',' << channel << ',' << amplitude << ']';
         };
-        while (!stopped && (!frames || count < frames)) {
-            uint64_t frame = count;
+        // A detected peak can arrive with the next SDK frame. Keep one frame
+        // pending so delayed spikes retain their timestamps across batch boundaries.
+        auto append_frame = [&](uint64_t frame, const std::vector<std::pair<unsigned, float>>& events) {
+            if (count && (frame <= previous || frame - previous != 1))
+                throw std::runtime_error("frame discontinuity: restart and invalidate active trial");
+            if (batch_count && spike_count + events.size() > 4096) flush();
+            if (!batch_count) first = frame;
+            previous = frame; ++batch_count; ++count;
+            for (const auto& event : events) add(frame, event.first, event.second);
+            if (batch_count >= 200 || spike_count >= 4096) flush();
+        };
 #ifdef WITH_MAXLAB
-            maxlab::FilteredFrameData data{};
+        bool pending_valid = false;
+        uint64_t pending_frame = 0, initial_spikes = 0;
+        std::vector<std::pair<unsigned, float>> pending_events;
+#endif
+        while (!stopped && (!frames || count < frames)) {
+#ifdef WITH_MAXLAB
             if (opened) {
+                maxlab::FilteredFrameData data{};
                 auto status = maxlab::DataStreamerFiltered_receiveNextFrame(&data);
                 if (status == maxlab::MAXLAB_NO_FRAME) {
                     if (Clock::now() - last_frame > std::chrono::seconds(2)) throw std::runtime_error("stream timeout");
@@ -153,38 +169,53 @@ int main(int argc, char** argv) {
                     continue;
                 }
                 if (data.frameInfo.corrupted) throw std::runtime_error("corrupted frame");
-                frame = data.frameInfo.frame_number;
-            }
-#endif
-            if (count && (frame <= previous || frame - previous != 1))
-                throw std::runtime_error("frame discontinuity: restart and invalidate active trial");
-            if (!batch_count) first = frame;
-            previous = frame; ++batch_count; ++count; last_frame = Clock::now();
-#ifdef WITH_MAXLAB
-            if (opened) {
+                const uint64_t frame = data.frameInfo.frame_number;
+                if (pending_valid && (frame <= pending_frame || frame - pending_frame != 1))
+                    throw std::runtime_error("frame discontinuity: restart and invalidate active trial");
+                last_frame = Clock::now();
                 if (data.spikeCount > 1024 || (data.spikeCount && !data.spikeEvents))
                     throw std::runtime_error("invalid SDK spike buffer");
+                std::vector<std::pair<unsigned, float>> current_events;
                 for (uint64_t i = 0; i < data.spikeCount; ++i) {
                     const auto& spike = data.spikeEvents[i];
-                    // Conservative until onsite SDK timestamp semantics have been verified.
-                    if (spike.wellId != well || spike.frameNo != frame)
-                        throw std::runtime_error("spike/frame timestamp or well mismatch");
-                    add(spike.frameNo, spike.channel, spike.amp);
+                    if (spike.wellId != well || spike.frameNo > frame || frame - spike.frameNo > 1)
+                        throw std::runtime_error(
+                            "spike/frame mismatch: frame=" + std::to_string(frame) +
+                            " spike_frame=" + std::to_string(spike.frameNo) +
+                            " frame_well=" + std::to_string(static_cast<unsigned>(data.frameInfo.well_id)) +
+                            " spike_well=" + std::to_string(static_cast<unsigned>(spike.wellId)) +
+                            " requested_well=" + std::to_string(well) +
+                            " channel=" + std::to_string(spike.channel));
+                    if (spike.channel >= 1024 || !std::isfinite(spike.amp))
+                        throw std::runtime_error("invalid spike");
+                    if (spike.frameNo == frame)
+                        current_events.emplace_back(spike.channel, spike.amp);
+                    else if (pending_valid)
+                        pending_events.emplace_back(spike.channel, spike.amp);
+                    else
+                        ++initial_spikes; // Peak predates the first acquired frame.
                 }
-            } else
+                if (pending_valid) append_frame(pending_frame, pending_events);
+                pending_frame = frame;
+                pending_events = std::move(current_events);
+                pending_valid = true;
+                continue;
+            }
 #endif
-            {
-                if (!mock_spikes.empty()) {
-                    auto found = fixture.find(frame);
-                    if (found != fixture.end())
-                        for (const auto& spike : found->second) add(frame, spike.first, spike.second);
-                } else if (frame % 100 == 0) add(frame, 0, -42.0f);
-            }
-            if (batch_count >= 200 || spike_count >= 4096) {
-                flush();
-                if (mode == "mock") std::this_thread::sleep_until(start + std::chrono::microseconds(count * 1000000 / rate));
-            }
+            const uint64_t frame = count;
+            std::vector<std::pair<unsigned, float>> events;
+            if (!mock_spikes.empty()) {
+                auto found = fixture.find(frame);
+                if (found != fixture.end()) events = found->second;
+            } else if (frame % 100 == 0) events.emplace_back(0, -42.0f);
+            append_frame(frame, events);
+            if (batch_count == 0)
+                std::this_thread::sleep_until(start + std::chrono::microseconds(count * 1000000 / rate));
         }
+#ifdef WITH_MAXLAB
+        if (initial_spikes)
+            std::cerr << "Ignored " << initial_spikes << " spike(s) before the first acquired frame\n";
+#endif
         flush();
         emit("{\"type\":\"end\",\"frames\":" + std::to_string(count) + "}\n");
     } catch (const std::exception& e) {
