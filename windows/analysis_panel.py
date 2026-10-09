@@ -23,9 +23,9 @@ class CandidateMap(QWidget):
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        p.fillRect(self.rect(), QColor('#101d30'))
+        p.fillRect(self.rect(), QColor('#ffffff'))
         p.setFont(QFont('Microsoft YaHei', 9))
-        p.setPen(QColor('#8fa8c5'))
+        p.setPen(QColor('#737373'))
         if not self.result:
             p.drawText(self.rect(), Qt.AlignCenter, '分析完成后显示候选空间位置')
             return
@@ -38,7 +38,7 @@ class CandidateMap(QWidget):
         scale = min(area.width()/max(35, xmax-xmin+35), area.height()/max(35, ymax-ymin+35))
         ox, oy = area.center().x()-(xmin+xmax)*scale/2, area.center().y()-(ymin+ymax)*scale/2
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor('#344b65'))
+        p.setBrush(QColor('#d2d2ce'))
         for row in rows:
             p.drawEllipse(QRectF(ox+row['x']*scale-2, oy+row['y']*scale-2, 4, 4))
         candidates = self.result['candidates']
@@ -49,16 +49,16 @@ class CandidateMap(QWidget):
             if not xy:
                 continue
             size = 6+6*row['out_degree']/peak
-            p.setBrush(QColor('#ffca68') if row['electrode'] == self.selected else QColor('#42d7bd'))
+            p.setBrush(QColor('#303030') if row['electrode'] == self.selected else QColor('#4c7592'))
             p.drawEllipse(QRectF(ox+xy['x']*scale-size/2, oy+xy['y']*scale-size/2, size, size))
             if row['electrode'] == self.selected:
-                p.setPen(QColor('#ffe5a8'))
+                p.setPen(QColor('#303030'))
                 p.drawText(int(ox+xy['x']*scale+9), int(oy+xy['y']*scale-9), str(row['electrode']))
                 p.setPen(Qt.NoPen)
-        p.setPen(QColor('#8fa8c5'))
+        p.setPen(QColor('#737373'))
         p.drawText(12, 19, f'Y ↓   {ymin:g} – {ymax:g} μm')
         p.drawText(12, self.height()-14, f'X → {xmin:g} – {xmax:g} μm')
-        p.drawText(self.width()-220, self.height()-14, '青色：候选   黄色：当前选中')
+        p.drawText(self.width()-220, self.height()-14, '蓝色：候选   黑色：当前选中')
 
 
 class AnalysisPanel(QWidget):
@@ -163,7 +163,7 @@ class AnalysisPanel(QWidget):
             self.summary.setText('Burst —    有向关系 —    候选 —    出度阈值 —')
             self.status.setText('完整录制保存后自动分析' if supported else '第二阶段需要更新 Linux 服务')
             for chip in self.stage_labels:
-                chip.setStyleSheet('color:#8fa8c5;padding:8px;')
+                chip.setStyleSheet('color:#737373;padding:8px;')
             return
         mode = ('本地 H5' if analysis.get('origin') == 'local' else
                 '模拟数据' if analysis.get('mode', job.get('mode') if job else None) == 'mock' else '真实数据')
@@ -178,7 +178,7 @@ class AnalysisPanel(QWidget):
         current = {'reading': 0, 'bursts': 1, 'activation': 2, 'connections': 2,
                    'selection': 3, 'saving': 3, 'completed': 4}.get(analysis.get('stage'), -1)
         for i, chip in enumerate(self.stage_labels):
-            color = '#58dcc3' if i <= current else '#8fa8c5'
+            color = '#303030' if i <= current else '#737373'
             chip.setStyleSheet(f'color:{color};padding:8px;')
         lines = []
         for event in analysis.get('log', []):

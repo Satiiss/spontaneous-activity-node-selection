@@ -20,7 +20,7 @@ from .routing_dialog import RoutingDialog
 from .future_panels import CalibrationPanel, GamePreviewPanel
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal, QRectF
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QPainter, QPen, QPalette
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QLabel, QPushButton,
     QLineEdit, QHBoxLayout, QVBoxLayout, QGridLayout, QProgressBar, QTableWidget,
     QTableWidgetItem, QHeaderView, QSplitter, QMessageBox, QAbstractItemView, QTabWidget, QFileDialog)
@@ -75,17 +75,17 @@ class Plot(QWidget):
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        p.fillRect(self.rect(), QColor('#101d30'))
+        p.fillRect(self.rect(), QColor('#ffffff'))
         p.setFont(QFont('Microsoft YaHei', 9))
-        p.setPen(QColor('#8fa8c5'))
+        p.setPen(QColor('#737373'))
         area = QRectF(60, 22, self.width()-85, self.height()-65)
         for i in range(6):
             y = area.top()+area.height()*i/5
-            p.setPen(QColor('#23354b'))
+            p.setPen(QColor('#ececea'))
             p.drawLine(area.left(), y, area.right(), y)
         job = self.job
         if not job:
-            p.setPen(QColor('#8fa8c5'))
+            p.setPen(QColor('#737373'))
             p.drawText(self.rect(), Qt.AlignCenter, '连接采集服务并开始录制后显示')
             return
         rates = job.get('rates', [])
@@ -97,12 +97,12 @@ class Plot(QWidget):
             span = max(5, end-start)
             channels = [r['channel'] for r in rates]
             low, high = min(channels), max(channels)
-            p.setPen(QPen(QColor('#47dbc0'), 1.5))
+            p.setPen(QPen(QColor('#555555'), 1.5))
             for t, c, _ in job.get('raster', []):
                 x = area.left()+(t-start)/span*area.width()
                 y = area.bottom()-(c-low)/max(1, high-low)*area.height()
                 p.drawLine(x, y-1, x, y+1)
-            p.setPen(QColor('#8fa8c5'))
+            p.setPen(QColor('#737373'))
             p.drawText(8, 25, f'CH {high}')
             p.drawText(8, int(area.bottom()), f'{low}')
             for i in range(6):
@@ -119,10 +119,10 @@ class Plot(QWidget):
             peak = max(1., max(r['hz'] for r in rates))
             for r in rates:
                 value = min(1, r['hz']/peak)
-                color = QColor.fromHsvF(.58-.45*value, .7, .25+.75*value)
+                color = QColor.fromRgbF(.90-.70*value, .91-.53*value, .92-.40*value)
                 p.setBrush(color)
                 p.drawRect(QRectF(ox+r['x']*scale-size/2, oy+r['y']*scale-size/2, size, size))
-            p.setPen(QColor('#8fa8c5'))
+            p.setPen(QColor('#737373'))
             p.drawText(12, 16, f'Y ↓   μm    {ymin:g} – {ymax:g}')
             p.drawText(12, self.height()-18, f'X → {xmin:g} – {xmax:g} μm')
             p.drawText(self.width()-175, self.height()-18, f'色阶 0 – {peak:.1f} Hz（动态）')
@@ -513,25 +513,50 @@ class Window(QMainWindow):
 
 
 STYLE = '''
-QWidget {background:#0a1322;color:#dfeaf8;font-family:"Microsoft YaHei";font-size:12px;}
-QWidget#card {background:#101d30;border:1px solid #273950;border-radius:8px;}
+QWidget {background:#f7f7f6;color:#242424;font-family:"Microsoft YaHei";font-size:12px;}
+QLabel {background:transparent;}
+QWidget#card {background:#ffffff;border:1px solid #e2e2df;border-radius:8px;}
 QWidget#card QLabel {background:transparent;border:none;}
-QLabel#title {font-size:25px;font-weight:700;} QLabel#section {font-size:14px;font-weight:600;}
-QLabel#muted {color:#92a8c3;font-size:11px;} QLabel#metric {font-size:26px;color:#58dcc3;}
-QLabel#badge {background:#173a40;color:#70e2d0;border-radius:5px;padding:8px;}
-QLineEdit {background:#132239;border:1px solid #334d6b;border-radius:5px;padding:8px;}
-QPushButton {background:#233750;border:1px solid #3b526b;border-radius:5px;padding:9px 13px;}
-QPushButton:hover {background:#31506f;} QPushButton#primary {background:#1b857a;color:white;}
-QPushButton:disabled {background:#182234;color:#60738c;border-color:#263346;}
-QPushButton#primary:disabled {background:#18372f;color:#658b80;border-color:#263d35;}
-QProgressBar {background:#20314a;border:none;} QProgressBar::chunk {background:#47d6b7;}
-QTableWidget {background:#101d30;alternate-background-color:#15243a;gridline-color:#20324a;border:none;}
-QHeaderView::section {background:#21334b;color:#c8d9ed;padding:7px;border:none;}
-QScrollBar:vertical {background:#142137;width:10px;} QScrollBar::handle:vertical {background:#3c526c;}
-QTabWidget::pane {border:1px solid #273950;border-radius:6px;}
-QTabBar::tab {background:#18283e;padding:10px 24px;color:#91a8c3;}
-QTabBar::tab:selected {background:#20453f;color:#70e2d0;}
-QPlainTextEdit {background:#101d30;border:1px solid #273950;}
+QLabel#title {font-size:25px;font-weight:700;color:#202020;}
+QLabel#section {font-size:14px;font-weight:600;color:#303030;}
+QLabel#muted {color:#737373;font-size:11px;} QLabel#metric {font-size:26px;color:#242424;}
+QLabel#badge {background:#ececea;color:#505050;border:1px solid #dededb;border-radius:6px;padding:8px;}
+QLineEdit, QSpinBox, QComboBox {background:#ffffff;color:#303030;border:1px solid #d9d9d6;border-radius:6px;padding:8px;selection-background-color:#dededb;selection-color:#202020;}
+QLineEdit:focus, QSpinBox:focus, QComboBox:focus {border-color:#777777;}
+QLineEdit:disabled, QSpinBox:disabled, QComboBox:disabled {background:#f1f1ef;color:#888888;}
+QComboBox QAbstractItemView {background:#ffffff;color:#242424;selection-background-color:#e7e7e4;selection-color:#202020;border:1px solid #d9d9d6;}
+QPushButton {background:#ffffff;color:#353535;border:1px solid #d9d9d6;border-radius:6px;padding:9px 13px;}
+QPushButton:hover {background:#eeeeeC;border-color:#bdbdb9;} QPushButton:pressed {background:#e3e3df;}
+QPushButton:focus {border-color:#777777;}
+QPushButton#primary {background:#303030;color:#ffffff;border-color:#303030;}
+QPushButton#primary:hover {background:#494949;border-color:#494949;}
+QPushButton:disabled, QPushButton#primary:disabled {background:#f0f0ee;color:#999995;border-color:#e2e2de;}
+QProgressBar {background:#e9e9e6;color:#242424;border:1px solid #dededb;border-radius:4px;text-align:center;min-height:16px;}
+QProgressBar::chunk {background:#b8b8b2;border-radius:3px;}
+QTableWidget {background:#ffffff;alternate-background-color:#f6f6f4;color:#303030;gridline-color:#e9e9e6;border:1px solid #e2e2df;selection-background-color:#e5e5e1;selection-color:#202020;}
+QTableWidget::item {padding:5px;}
+QHeaderView::section {background:#f0f0ed;color:#555555;padding:7px;border:none;border-bottom:1px solid #dededb;font-weight:600;}
+QTableCornerButton::section {background:#f0f0ed;border:none;}
+QScrollBar:vertical {background:#f3f3f1;width:10px;margin:0;}
+QScrollBar::handle:vertical {background:#c5c5bf;border-radius:4px;min-height:24px;}
+QScrollBar:horizontal {background:#f3f3f1;height:10px;margin:0;}
+QScrollBar::handle:horizontal {background:#c5c5bf;border-radius:4px;min-width:24px;}
+QScrollBar::add-line, QScrollBar::sub-line {width:0;height:0;}
+QScrollBar::add-page, QScrollBar::sub-page {background:transparent;}
+QTabWidget::pane {background:#f7f7f6;border:1px solid #dededb;border-radius:6px;}
+QTabBar::tab {background:#eeeeeB;padding:10px 24px;color:#717171;border:1px solid transparent;border-top-left-radius:6px;border-top-right-radius:6px;}
+QTabBar::tab:hover {background:#e6e6e2;color:#303030;}
+QTabBar::tab:selected {background:#ffffff;color:#202020;border-color:#dededb;border-bottom-color:#ffffff;font-weight:600;}
+QPlainTextEdit {background:#ffffff;color:#525252;border:1px solid #dededb;border-radius:5px;selection-background-color:#e5e5e1;selection-color:#202020;}
+QCheckBox {background:transparent;spacing:7px;color:#404040;}
+QCheckBox:disabled {color:#92928c;}
+QCheckBox::indicator {width:14px;height:14px;}
+QCheckBox::indicator:unchecked {background:#ffffff;border:1px solid #bcbcb7;border-radius:3px;}
+QCheckBox::indicator:unchecked:disabled {background:#f1f1ef;border-color:#d9d9d4;}
+QComboBox::drop-down {width:22px;border:none;border-left:1px solid #dededb;}
+QSpinBox::up-button, QSpinBox::down-button {border:none;border-left:1px solid #dededb;width:16px;}
+QSplitter::handle {background:#e9e9e6;}
+QToolTip {background:#ffffff;color:#303030;border:1px solid #d9d9d6;padding:5px;}
 '''
 
 
@@ -541,6 +566,16 @@ def configure_fonts(app):
         path = Path('C:/Windows/Fonts')/name
         if path.exists():
             QFontDatabase.addApplicationFont(str(path))
+    app.setStyle('Fusion')
+    palette = QPalette()
+    for role, color in ((QPalette.Window, '#f7f7f6'), (QPalette.WindowText, '#242424'),
+                        (QPalette.Base, '#ffffff'), (QPalette.AlternateBase, '#f6f6f4'),
+                        (QPalette.Text, '#303030'), (QPalette.Button, '#ffffff'),
+                        (QPalette.ButtonText, '#353535'), (QPalette.Highlight, '#e5e5e1'),
+                        (QPalette.HighlightedText, '#202020'), (QPalette.ToolTipBase, '#ffffff'),
+                        (QPalette.ToolTipText, '#303030')):
+        palette.setColor(role, QColor(color))
+    app.setPalette(palette)
     app.setFont(QFont('Microsoft YaHei', 10))
     app.setStyleSheet(STYLE)
 
